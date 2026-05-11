@@ -232,6 +232,22 @@ public class BufferPool {
         }
     }
 
+    public void DiscardAllPages() {
+        pageMap.clear();
+        freeList.clear();
+        for (int i = 0; i < poolSize; i++) {
+            Page page = pages.get(i);
+            Arrays.fill(page.data.array(), (byte) 0);
+            page.position = new PagePosition("null", 0);
+            page.pin_count = 0;
+            page.dirty = false;
+            freeList.add(i);
+        }
+        // REVIEW: The replacer implementations do not expose a reset hook. The
+        // free list is repopulated so subsequent page fetches do not consult stale
+        // replacement state until the pool is filled again.
+    }
+
     /**
      * 查找一个受害者页面以进行替换。
      * 

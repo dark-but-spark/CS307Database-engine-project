@@ -17,6 +17,7 @@ import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
 import net.sf.jsqlparser.statement.select.Values;
+import net.sf.jsqlparser.statement.update.UpdateSet;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -188,11 +189,22 @@ public class PhysicalPlanner {
 
 
     private static PhysicalOperator handleUpdate(DBManager dbManager, LogicalUpdateOperator logicalUpdateOp) throws DBException {
-        // TODO: Implement handleUpdate
+        // REVIEW: Implement handleUpdate
         PhysicalOperator scanner = generateOperator(dbManager, logicalUpdateOp.getChild());
-        if (logicalUpdateOp.getColumns().size() != 1 ) {
-            throw new DBException(ExceptionTypes.InvalidSQL("INSERT", "Unsupported expression list"));
+        if (logicalUpdateOp.getColumns().isEmpty()) {
+            throw new DBException(ExceptionTypes.InvalidSQL("UPDATE", "Missing SET clause"));
         }
-        return new UpdateOperator(scanner, logicalUpdateOp.getTableName(), logicalUpdateOp.getColumns().get(0), logicalUpdateOp.getExpression());
+        UpdateSet mergedUpdateSet = mergeUpdateSets(logicalUpdateOp.getColumns());
+        return new UpdateOperator(scanner, logicalUpdateOp.getTableName(), mergedUpdateSet, logicalUpdateOp.getExpression());
+    }
+
+    private static UpdateSet mergeUpdateSets(List<UpdateSet> updateSets) {
+        UpdateSet mergedUpdateSet = new UpdateSet();
+        for (UpdateSet updateSet : updateSets) {
+            for (int i = 0; i < updateSet.getColumns().size(); i++) {
+                mergedUpdateSet.add(updateSet.getColumn(i), updateSet.getValue(i));
+            }
+        }
+        return mergedUpdateSet;
     }
 }

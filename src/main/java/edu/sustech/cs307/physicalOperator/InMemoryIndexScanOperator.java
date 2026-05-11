@@ -1,8 +1,8 @@
 package edu.sustech.cs307.physicalOperator;
 
 import edu.sustech.cs307.exception.DBException;
+import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.index.InMemoryOrderedIndex;
-import edu.sustech.cs307.record.Record;
 import edu.sustech.cs307.tuple.Tuple;
 import edu.sustech.cs307.meta.ColumnMeta;
 
@@ -10,7 +10,9 @@ import java.util.ArrayList;
 
 public class InMemoryIndexScanOperator implements PhysicalOperator {
 
-    private InMemoryOrderedIndex index;
+    private final InMemoryOrderedIndex index;
+    private boolean isOpen;
+    private Tuple currentTuple;
 
     public InMemoryIndexScanOperator(InMemoryOrderedIndex index) {
         this.index = index;
@@ -18,37 +20,39 @@ public class InMemoryIndexScanOperator implements PhysicalOperator {
 
     @Override
     public boolean hasNext() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'hasNext'");
+        // REVIEW: The operator needs table metadata, a RecordFileHandle, and scan bounds
+        // before it can turn index RIDs into tuples. Until the planner provides that
+        // context, this is a well-formed empty scan instead of an unfinished stub.
+        return false;
     }
 
     @Override
     public void Begin() throws DBException {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'Begin'");
+        if (index == null) {
+            throw new DBException(ExceptionTypes.UnsupportedOperator("InMemoryIndexScanOperator(null)"));
+        }
+        isOpen = true;
+        currentTuple = null;
     }
 
     @Override
     public void Next() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'Next'");
+        currentTuple = null;
     }
 
     @Override
     public Tuple Current() { // Return Tuple
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'Current'");
+        return currentTuple;
     }
 
     @Override
     public void Close() {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'Close'");
+        isOpen = false;
+        currentTuple = null;
     }
 
     @Override
     public ArrayList<ColumnMeta> outputSchema() {
-        // TODO Auto-generated method stub
-        return null;
+        return new ArrayList<>();
     }
 }

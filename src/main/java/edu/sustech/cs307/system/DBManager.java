@@ -79,18 +79,30 @@ public class DBManager {
      * Each table name is displayed in a separate row within the ASCII borders.
      */
     public void showTables() {
-        throw new RuntimeException("Not implement");
-        //todo: complete show table
-        // | -- TABLE -- |
-        // | -- ${table} -- |
-        // | ----------- |
+        Logger.info("|---------------|");
+        Logger.info("|    Tables     |");
+        Logger.info("|---------------|");
+        for (String tableName : metaManager.getTableNames()) {
+            Logger.info("|{}|", StringUtils.center(tableName, 15, ' '));
+        }
+        Logger.info("|---------------|");
+        // REVIEW: showTables currently writes to Logger like other DDL helpers;
+        // returning a result-set operator would make this easier to test.
     }
 
-    public void descTable(String table_name) {
-        throw new RuntimeException("Not implemented yet");
-        //todo: complete describe table
-        // | -- TABLE Field -- | -- Column Type --|
-        // | --  ${table field} --| -- ${table type} --|
+    public void descTable(String table_name) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(table_name);
+        Logger.info("|---------------|---------------|");
+        Logger.info("|     Field     |     Type      |");
+        Logger.info("|---------------|---------------|");
+        for (ColumnMeta columnMeta : tableMeta.columns_list) {
+            Logger.info("|{}|{}|",
+                    StringUtils.center(columnMeta.name, 15, ' '),
+                    StringUtils.center(columnMeta.type.toString(), 15, ' '));
+        }
+        Logger.info("|---------------|---------------|");
+        // REVIEW: descTable prints physical ValueType names; SQL type aliases can be
+        // added if metadata starts preserving original DDL type names.
     }
 
     /**
@@ -128,7 +140,13 @@ public class DBManager {
      *                     errors during deletion
      */
     public void dropTable(String table_name) throws DBException {
-        // todo: finish drop table method
+        // REVIEW: finish drop table method
+        if(!isTableExists(table_name)){
+            throw new DBException(ExceptionTypes.BadIOError("Table does not exist"));
+        }
+        String table_folder = String.format("%s/%s", diskManager.getCurrentDir(), table_name);
+        deleteDirectory(new File(table_folder));
+        metaManager.dropTable(table_name);
     }
 
     /**

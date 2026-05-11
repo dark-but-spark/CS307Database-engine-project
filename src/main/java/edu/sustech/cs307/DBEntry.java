@@ -41,7 +41,7 @@ public class DBEntry {
         Logger.getConfiguration().formatPattern("{date: HH:mm:ss.SSS} {level}: {message}").activate();
 
         Logger.info("Hello, This is CS307-DB!");
-        Logger.info("Initializing...");
+        Logger.info("Initializing..."); 
         DBManager dbManager = null;
         try {
             Map<String, Integer> disk_manager_meta = new HashMap<>(DiskManager.read_disk_manager_meta());

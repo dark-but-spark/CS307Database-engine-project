@@ -11,6 +11,7 @@ import net.sf.jsqlparser.statement.Commit;
 import net.sf.jsqlparser.statement.ExplainStatement;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.delete.Delete;
 import net.sf.jsqlparser.statement.select.*;
 import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.statement.insert.Insert;
@@ -27,6 +28,11 @@ import edu.sustech.cs307.exception.DBException;
 public class LogicalPlanner {
     private static final Pattern BEGIN_PATTERN = Pattern.compile("(?i)^BEGIN(?:\\s+(?:WORK|TRANSACTION))?$");
     private static final Pattern START_TRANSACTION_PATTERN = Pattern.compile("(?i)^START\\s+TRANSACTION$");
+    private static final Pattern ROLLBACK_PATTERN = Pattern.compile("(?i)^ROLLBACK(?:\\s+(?:WORK|TRANSACTION))?$");
+    private static final Pattern SAVEPOINT_PATTERN =
+            Pattern.compile("(?i)^SAVEPOINT\\s+([A-Za-z_][A-Za-z0-9_]*)$");
+    private static final Pattern ROLLBACK_TO_SAVEPOINT_PATTERN =
+            Pattern.compile("(?i)^ROLLBACK\\s+TO(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
     private static final Pattern RELEASE_SAVEPOINT_PATTERN =
             Pattern.compile("(?i)^RELEASE(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
 
@@ -56,7 +62,11 @@ public class LogicalPlanner {
             dbManager.commitTransaction();
             return null;
         }
-        //todo: add condition of handleDelete
+        //REVIEW: add condition of handleDelete
+        else if (stmt instanceof Delete deleteStmt) {
+            dbManager.dropTable(deleteStmt.getTable().getName());
+            return null;
+        }
         // functional
         else if (stmt instanceof CreateTable createTableStmt) {
             CreateTableExecutor createTable = new CreateTableExecutor(createTableStmt, dbManager, sql);
@@ -126,6 +136,25 @@ public class LogicalPlanner {
         String normalizedSql = normalizeSql(sql);
         if (BEGIN_PATTERN.matcher(normalizedSql).matches() || START_TRANSACTION_PATTERN.matcher(normalizedSql).matches()) {
             dbManager.beginTransaction();
+            return true;
+        }
+        if (ROLLBACK_PATTERN.matcher(normalizedSql).matches()) {
+            dbManager.getTransactionManager().rollback();
+            return true;
+        }
+        Matcher savepointMatcher = SAVEPOINT_PATTERN.matcher(normalizedSql);
+        if (savepointMatcher.matches()) {
+            dbManager.getTransactionManager().savepoint(savepointMatcher.group(1));
+            return true;
+        }
+        Matcher rollbackToSavepointMatcher = ROLLBACK_TO_SAVEPOINT_PATTERN.matcher(normalizedSql);
+        if (rollbackToSavepointMatcher.matches()) {
+            dbManager.getTransactionManager().rollbackToSavepoint(rollbackToSavepointMatcher.group(1));
+            return true;
+        }
+        Matcher releaseSavepointMatcher = RELEASE_SAVEPOINT_PATTERN.matcher(normalizedSql);
+        if (releaseSavepointMatcher.matches()) {
+            dbManager.getTransactionManager().releaseSavepoint(releaseSavepointMatcher.group(1));
             return true;
         }
         return false;

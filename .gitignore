@@ -29,3 +29,9 @@ bin/
 .DS_Store
 .idea/
 .CS307-DB/
+
+# Maven-generated files
+target/
+
+# Database files
+CS307-DB/

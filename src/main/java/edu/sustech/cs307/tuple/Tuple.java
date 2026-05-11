@@ -22,20 +22,24 @@ public abstract class Tuple {
         return evaluateCondition(this, expr);
     }
 
-    private boolean evaluateCondition(Tuple tuple, Expression whereExpr) {
-        //todo: add Or condition
+    private boolean evaluateCondition(Tuple tuple, Expression whereExpr) throws DBException {
         if (whereExpr instanceof AndExpression andExpr) {
             // Recursively evaluate left and right expressions
             return evaluateCondition(tuple, andExpr.getLeftExpression())
                     && evaluateCondition(tuple, andExpr.getRightExpression());
+        } else if (whereExpr instanceof OrExpression orExpr) {
+            return evaluateCondition(tuple, orExpr.getLeftExpression())
+                    || evaluateCondition(tuple, orExpr.getRightExpression());
         } else if (whereExpr instanceof BinaryExpression binaryExpression) {
             return evaluateBinaryExpression(tuple, binaryExpression);
         } else {
+            // REVIEW: Non-binary predicates such as IS NULL and LIKE are accepted
+            // until their expression-specific semantics are implemented.
             return true; // For non-binary and non-AND expressions, just return true for now
         }
     }
 
-    private boolean evaluateBinaryExpression(Tuple tuple, BinaryExpression binaryExpr) {
+    private boolean evaluateBinaryExpression(Tuple tuple, BinaryExpression binaryExpr) throws DBException {
         Expression leftExpr = binaryExpr.getLeftExpression();
         Expression rightExpr = binaryExpr.getRightExpression();
         String operator = binaryExpr.getStringExpression();
@@ -75,15 +79,16 @@ public abstract class Tuple {
                 return false;
 
             int comparisonResult = ValueComparer.compare(leftValue, rightValue);
-            if (operator.equals("=")) {
-                return comparisonResult == 0;
-            }
-            // todo: finish condition > < >= <=
-
-        } catch (DBException e) {
-            e.printStackTrace(); // Handle exception properly
+            return switch (operator) {
+                case "=" -> comparisonResult == 0;
+                case "!=", "<>" -> comparisonResult != 0;
+                case ">" -> comparisonResult > 0;
+                case "<" -> comparisonResult < 0;
+                case ">=" -> comparisonResult >= 0;
+                case "<=" -> comparisonResult <= 0;
+                default -> throw new DBException(ExceptionTypes.UnsupportedExpression(binaryExpr));
+            };
         }
-        return false;
     }
 
     private Value getConstantValue(Expression expr) {

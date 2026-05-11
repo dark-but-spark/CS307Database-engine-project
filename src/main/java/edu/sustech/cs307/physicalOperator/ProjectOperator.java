@@ -66,7 +66,20 @@ public class ProjectOperator implements PhysicalOperator {
 
     @Override
     public ArrayList<ColumnMeta> outputSchema() {
-        //todo: return the fields only appear in select items.
-        return child.outputSchema();
+        ArrayList<ColumnMeta> childSchema = child.outputSchema();
+        ArrayList<ColumnMeta> projectedSchema = new ArrayList<>();
+        for (TabCol outputColumn : outputSchema) {
+            for (ColumnMeta columnMeta : childSchema) {
+                boolean tableMatches = outputColumn.getTableName().equals(columnMeta.tableName)
+                        || outputColumn.getTableName().equals(outputColumn.getColumnName());
+                if (tableMatches && outputColumn.getColumnName().equals(columnMeta.name)) {
+                    projectedSchema.add(columnMeta);
+                    break;
+                }
+            }
+        }
+        // REVIEW: Ambiguous unqualified columns are resolved to the first matching
+        // child column, matching the current ProjectTuple lookup behavior.
+        return projectedSchema;
     }
 }

@@ -29,10 +29,11 @@ public class LogicalProjectOperator extends LogicalOperator {
     public List<TabCol> getOutputSchema() throws DBException {
         List<TabCol> outputSchema = new ArrayList<>();
         for (SelectItem<?> selectItem : selectItems) {
-            //REVIEW : add selectItem.getExpression() instance of Column
             if (selectItem.getExpression() instanceof AllColumns column) {
                 outputSchema.add(new TabCol("*", "*"));
             } else {
+                // REVIEW: Qualified columns such as t.id are currently stored as
+                // both table and column text. Split Column expressions explicitly.
                 outputSchema.add(new TabCol(selectItem.getExpression().toString(), selectItem.getExpression().toString()));
                 // throw new DBException(ExceptionTypes.NotSupportedOperation(selectItem.getExpression()));
             }

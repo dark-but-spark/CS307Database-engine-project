@@ -189,7 +189,6 @@ public class PhysicalPlanner {
 
 
     private static PhysicalOperator handleUpdate(DBManager dbManager, LogicalUpdateOperator logicalUpdateOp) throws DBException {
-        // REVIEW: Implement handleUpdate
         PhysicalOperator scanner = generateOperator(dbManager, logicalUpdateOp.getChild());
         if (logicalUpdateOp.getColumns().isEmpty()) {
             throw new DBException(ExceptionTypes.InvalidSQL("UPDATE", "Missing SET clause"));

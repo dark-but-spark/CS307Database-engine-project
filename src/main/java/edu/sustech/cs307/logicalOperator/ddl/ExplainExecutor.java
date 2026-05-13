@@ -22,7 +22,6 @@ public class ExplainExecutor implements DMLExecutor {
 
     @Override
     public void execute() throws DBException {
-       //REVIEW: finish this function here, and add log info
        if(explainStatement.getStatement()==null){
            throw new DBException(ExceptionTypes.UnsupportedCommand(explainStatement.toString()));
        }

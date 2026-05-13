@@ -62,8 +62,9 @@ public class LogicalPlanner {
             dbManager.commitTransaction();
             return null;
         }
-        //REVIEW: add condition of handleDelete
         else if (stmt instanceof Delete deleteStmt) {
+            // REVIEW: DELETE currently drops the whole table. Keep this marked until
+            // row-level delete planning and a physical delete operator are added.
             dbManager.dropTable(deleteStmt.getTable().getName());
             return null;
         }

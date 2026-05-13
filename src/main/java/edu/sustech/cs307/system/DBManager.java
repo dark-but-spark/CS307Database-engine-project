@@ -140,7 +140,6 @@ public class DBManager {
      *                     errors during deletion
      */
     public void dropTable(String table_name) throws DBException {
-        // REVIEW: finish drop table method
         if(!isTableExists(table_name)){
             throw new DBException(ExceptionTypes.BadIOError("Table does not exist"));
         }

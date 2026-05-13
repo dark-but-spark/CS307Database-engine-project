@@ -2,13 +2,18 @@ package edu.sustech.cs307.system;
 
 import edu.sustech.cs307.exception.DBException;
 import edu.sustech.cs307.exception.ExceptionTypes;
+import edu.sustech.cs307.index.BPlusTreeIndex;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.meta.MetaManager;
 import edu.sustech.cs307.meta.TableMeta;
+import edu.sustech.cs307.physicalOperator.SeqScanOperator;
+import edu.sustech.cs307.record.RID;
 import edu.sustech.cs307.storage.BufferPool;
 import edu.sustech.cs307.storage.DiskManager;
 import edu.sustech.cs307.storage.replacer.ClockReplacer;
 import edu.sustech.cs307.storage.replacer.PageReplacer;
+import edu.sustech.cs307.tuple.TableTuple;
+import edu.sustech.cs307.value.Value;
 import org.apache.commons.lang3.StringUtils;
 import org.pmw.tinylog.Logger;
 
@@ -16,6 +21,8 @@ import java.io.File;
 import java.io.IOException;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.IntFunction;
 
 public class DBManager {
@@ -26,6 +33,7 @@ public class DBManager {
     private final RecordManager recordManager;
     private TransactionManager transactionManager;
     private final IntFunction<PageReplacer> replacerFactory;
+    private final Map<String, BPlusTreeIndex> runtimeIndexes;
 
     public DBManager(DiskManager diskManager, BufferPool bufferPool, RecordManager recordManager,
                      MetaManager metaManager) {
@@ -41,6 +49,7 @@ public class DBManager {
         this.metaManager = metaManager;
         this.replacerFactory = replacerFactory;
         this.transactionManager = transactionManager == null ? new TransactionManager(this) : transactionManager;
+        this.runtimeIndexes = new HashMap<>();
     }
 
     public TransactionManager getTransactionManager() {
@@ -136,6 +145,105 @@ public class DBManager {
         recordManager.CreateFile(data_file, record_size);
     }
 
+    public void createIndex(String indexName, String tableName, String columnName) throws DBException {
+        // Task 3.1 Index Support - CREATE INDEX: validate metadata, persist the
+        // index definition, and build an in-memory B+Tree from current table rows.
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        tableMeta.addIndex(indexName, columnName, TableMeta.IndexType.BTREE);
+        BPlusTreeIndex index = rebuildIndex(tableName, indexName);
+        metaManager.saveToJson();
+        Logger.info(index.printTree());
+    }
+
+    public void dropIndex(String indexName) throws DBException {
+        // Task 3.1 Index Support - DROP INDEX: remove the index definition and
+        // discard its runtime B+Tree.
+        for (String tableName : metaManager.getTableNames()) {
+            TableMeta tableMeta = metaManager.getTable(tableName);
+            if (tableMeta.getIndexes().containsKey(indexName)) {
+                tableMeta.dropIndex(indexName);
+                runtimeIndexes.remove(indexKey(tableName, indexName));
+                metaManager.saveToJson();
+                return;
+            }
+        }
+        throw new DBException(ExceptionTypes.InvalidSQL("DROP INDEX", "Index does not exist: " + indexName));
+    }
+
+    public BPlusTreeIndex getIndex(String tableName, String indexName) throws DBException {
+        BPlusTreeIndex index = runtimeIndexes.get(indexKey(tableName, indexName));
+        if (index == null) {
+            index = rebuildIndex(tableName, indexName);
+        }
+        return index;
+    }
+
+    public BPlusTreeIndex getIndexOnColumn(String tableName, String columnName) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        String indexName = tableMeta.findIndexOnColumn(columnName);
+        return indexName == null ? null : getIndex(tableName, indexName);
+    }
+
+    public void insertIntoIndexes(String tableName, RID rid, Value[] rowValues) throws DBException {
+        // Task 3.1 Index Support - Dynamic INSERT Maintenance: insert the new RID
+        // into every runtime B+Tree defined on this table.
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        for (String indexName : tableMeta.getIndexes().keySet()) {
+            int columnIndex = indexedColumnPosition(tableMeta, tableMeta.getIndexColumn(indexName));
+            getIndex(tableName, indexName).insert(rowValues[columnIndex], rid);
+        }
+    }
+
+    public void updateIndexes(String tableName, RID rid, Value[] oldValues, Value[] newValues) throws DBException {
+        // Task 3.1 Index Support - Dynamic UPDATE Maintenance: replace old indexed
+        // key entries with the updated row values.
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        for (String indexName : tableMeta.getIndexes().keySet()) {
+            int columnIndex = indexedColumnPosition(tableMeta, tableMeta.getIndexColumn(indexName));
+            BPlusTreeIndex index = getIndex(tableName, indexName);
+            index.delete(oldValues[columnIndex], rid);
+            index.insert(newValues[columnIndex], rid);
+        }
+    }
+
+    private BPlusTreeIndex rebuildIndex(String tableName, String indexName) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        String columnName = tableMeta.getIndexColumn(indexName);
+        if (columnName == null) {
+            throw new DBException(ExceptionTypes.InvalidSQL("INDEX", "Missing index column metadata: " + indexName));
+        }
+        int columnIndex = indexedColumnPosition(tableMeta, columnName);
+        BPlusTreeIndex index = new BPlusTreeIndex(tableName, indexName, columnName);
+        SeqScanOperator scanner = new SeqScanOperator(tableName, this);
+        try {
+            scanner.Begin();
+            while (scanner.hasNext()) {
+                scanner.Next();
+                TableTuple tuple = (TableTuple) scanner.Current();
+                if (tuple != null) {
+                    index.insert(tuple.getValues()[columnIndex], tuple.getRID());
+                }
+            }
+        } finally {
+            scanner.Close();
+        }
+        runtimeIndexes.put(indexKey(tableName, indexName), index);
+        return index;
+    }
+
+    private int indexedColumnPosition(TableMeta tableMeta, String columnName) throws DBException {
+        for (int i = 0; i < tableMeta.columns_list.size(); i++) {
+            if (tableMeta.columns_list.get(i).name.equalsIgnoreCase(columnName)) {
+                return i;
+            }
+        }
+        throw new DBException(ExceptionTypes.ColumnDoesNotExist(columnName));
+    }
+
+    private String indexKey(String tableName, String indexName) {
+        return tableName + "#" + indexName;
+    }
+
     /**
      * Drops a table from the database by removing its metadata and associated
      * files.
@@ -151,6 +259,7 @@ public class DBManager {
         }
         String table_folder = String.format("%s/%s", diskManager.getCurrentDir(), table_name);
         deleteDirectory(new File(table_folder));
+        runtimeIndexes.keySet().removeIf(key -> key.startsWith(table_name + "#"));
         metaManager.dropTable(table_name);
     }
 

@@ -2,8 +2,8 @@ package edu.sustech.cs307.physicalOperator;
 
 import edu.sustech.cs307.exception.DBException;
 import edu.sustech.cs307.meta.ColumnMeta;
+import edu.sustech.cs307.record.RID;
 import edu.sustech.cs307.system.DBManager;
-import edu.sustech.cs307.tuple.TableTuple;
 import edu.sustech.cs307.tuple.TempTuple;
 import edu.sustech.cs307.tuple.Tuple;
 import edu.sustech.cs307.value.Value;
@@ -54,7 +54,11 @@ public class InsertOperator implements PhysicalOperator {
             for (int i = 0; i < values.size(); i++) {
                 RecordSerializer.writeValue(buffer, values.get(i), insertColumns.get(i % columnSize));
                 if ((columnSize == 1) || ((i + 1) % columnSize == 0 && i != 0)) {
-                    fileHandle.InsertRecord(buffer);
+                    RID rid = fileHandle.InsertRecord(buffer);
+                    Value[] rowValues = values.subList(i + 1 - columnSize, i + 1).toArray(new Value[0]);
+                    // Task 3.1 Index Support - Dynamic INSERT Maintenance: use
+                    // the storage RID returned by InsertRecord to update indexes.
+                    dbManager.insertIntoIndexes(data_file, rid, rowValues);
                     buffer.clear();
                 }
             }

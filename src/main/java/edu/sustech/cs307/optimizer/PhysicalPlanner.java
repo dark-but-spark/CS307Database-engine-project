@@ -56,15 +56,12 @@ public class PhysicalPlanner {
             return new SeqScanOperator(tableName, dbManager);
         }
 
-        // Check if index exists for the table (for now, assume RBTreeIndex always
-        // exists if index is defined)
-        if (tableMeta.getIndexes() != null && !tableMeta.getIndexes().isEmpty()) {
-            throw new RuntimeException("unimplement");
-        } else {
-            // Task 2.1.3 Sequential Scan Implementation: use SeqScan as the
-            // default table access path when no usable index is planned.
-            return new SeqScanOperator(tableName, dbManager);
-        }
+        // REVIEW(Task 3.1 Index Support - Indexed Access Path): index metadata no
+        // longer blocks SELECT, but the optimizer still falls back to SeqScan
+        // until WHERE predicates are lowered into IndexScanOperator bounds.
+        // Task 2.1.3 Sequential Scan Implementation: use SeqScan as the
+        // default table access path when no usable index is planned.
+        return new SeqScanOperator(tableName, dbManager);
     }
 
     private static PhysicalOperator handleFilter(DBManager dbManager, LogicalFilterOperator logicalFilterOp)
@@ -208,7 +205,7 @@ public class PhysicalPlanner {
         UpdateSet mergedUpdateSet = mergeUpdateSets(logicalUpdateOp.getColumns());
         // Task 2.0.2 Data Operations - UPDATE: execute UPDATE through a sequential scan
         // and in-place record rewrite for rows satisfying the WHERE clause.
-        return new UpdateOperator(scanner, logicalUpdateOp.getTableName(), mergedUpdateSet, logicalUpdateOp.getExpression());
+        return new UpdateOperator(scanner, dbManager, logicalUpdateOp.getTableName(), mergedUpdateSet, logicalUpdateOp.getExpression());
     }
 
     private static UpdateSet mergeUpdateSets(List<UpdateSet> updateSets) {

@@ -12,9 +12,11 @@ import net.sf.jsqlparser.statement.ExplainStatement;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.delete.Delete;
+import net.sf.jsqlparser.statement.drop.Drop;
 import net.sf.jsqlparser.statement.select.*;
 import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.statement.insert.Insert;
+import net.sf.jsqlparser.statement.create.index.CreateIndex;
 import net.sf.jsqlparser.statement.create.table.CreateTable;
 
 import edu.sustech.cs307.exception.ExceptionTypes;
@@ -74,6 +76,17 @@ public class LogicalPlanner {
             // REVIEW(Task 2.1.2 Logical/Physical Operators - DELETE): DELETE currently drops the whole table. Keep this marked until
             // row-level delete planning and a physical delete operator are added.
             dbManager.dropTable(deleteStmt.getTable().getName());
+            return null;
+        }
+        else if (stmt instanceof CreateIndex createIndexStmt) {
+            // Task 3.1 Index Support - CREATE INDEX: parse one-column index DDL
+            // and build the corresponding runtime B+Tree.
+            handleCreateIndex(dbManager, createIndexStmt);
+            return null;
+        } else if (stmt instanceof Drop dropStmt && "INDEX".equalsIgnoreCase(dropStmt.getType())) {
+            // Task 3.1 Index Support - DROP INDEX: remove index metadata and its
+            // runtime tree.
+            dbManager.dropIndex(dropStmt.getName().getName());
             return null;
         }
         // functional
@@ -150,6 +163,22 @@ public class LogicalPlanner {
         return new LogicalUpdateOperator(root, updateStmt.getTable().getName(), updateStmt.getUpdateSets(),
                 updateStmt.getWhere());
     }
+
+    private static void handleCreateIndex(DBManager dbManager, CreateIndex createIndexStmt) throws DBException {
+        var index = createIndexStmt.getIndex();
+        if (index == null || index.getName() == null || index.getColumnsNames() == null
+                || index.getColumnsNames().size() != 1) {
+            throw new DBException(ExceptionTypes.InvalidSQL(createIndexStmt.toString(),
+                    "Only single-column CREATE INDEX is supported"));
+        }
+        String using = index.getUsing();
+        if (using != null && !using.equalsIgnoreCase("BTREE") && !using.equalsIgnoreCase("B+TREE")) {
+            throw new DBException(ExceptionTypes.InvalidSQL(createIndexStmt.toString(),
+                    "Only BTREE indexes are supported"));
+        }
+        dbManager.createIndex(index.getName(), createIndexStmt.getTable().getName(), index.getColumnsNames().get(0));
+    }
+
     private static String normalizeSql(String sql) {
         String normalizedSql = sql == null ? "" : sql.trim();
         while (normalizedSql.endsWith(";")) {

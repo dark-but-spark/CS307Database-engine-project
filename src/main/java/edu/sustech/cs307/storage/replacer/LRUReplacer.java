@@ -13,25 +13,45 @@ public class LRUReplacer implements PageReplacer {
         this.maxSize = numPages;
     }
 
-    // TODO(Task 1.1 Storage Management - LRU Page Replacement): Implement the full LRU replacement state machine expected by
-    // LRUReplacerTest: track pinned and evictable frames, reject invalid
-    // frame ids/state transitions, return -1 only when no evictable frame
-    // exists, and remove the victim from all internal state.
+    // REVIEW(Task 1.1 Storage Management - LRU Page Replacement): Tracks both
+    // pinned and evictable resident frames; Victim removes only evictable frames.
     public int Victim() {
-        return -1;
+        if (LRUList.isEmpty()) {
+            return -1;
+        }
+        int victim = LRUList.removeFirst();
+        LRUHash.remove(victim);
+        return victim;
     }
 
-    // TODO(Task 1.1 Storage Management - LRU Page Replacement): Mark the frame as pinned/non-evictable. Re-pinning an existing
-    // evictable frame should remove it from the LRU queue without changing
-    // the total tracked frame count.
+    // REVIEW(Task 1.1 Storage Management - LRU Page Replacement): Pin marks a
+    // frame non-evictable; re-pinning an evictable frame removes it from LRU order.
     public void Pin(int frameId) {
+        if (pinnedFrames.contains(frameId)) {
+            return;
+        }
+        if (LRUHash.remove(frameId)) {
+            LRUList.remove(Integer.valueOf(frameId));
+            pinnedFrames.add(frameId);
+            return;
+        }
+        if (size() >= maxSize) {
+            throw new RuntimeException("REPLACER IS FULL");
+        }
+        pinnedFrames.add(frameId);
     }
 
 
-    // TODO(Task 1.1 Storage Management - LRU Page Replacement): Mark a pinned frame as evictable and place it at the most-recent
-    // end of the LRU queue. Invalid or duplicate unpin operations should
-    // follow the exception behavior asserted by LRUReplacerTest.
+    // REVIEW(Task 1.1 Storage Management - LRU Page Replacement): Unpin moves a
+    // pinned frame to the most-recent evictable position.
     public void Unpin(int frameId) {
+        if (!pinnedFrames.remove(frameId)) {
+            throw new RuntimeException("UNPIN PAGE NOT FOUND");
+        }
+        if (!LRUHash.contains(frameId)) {
+            LRUHash.add(frameId);
+            LRUList.addLast(frameId);
+        }
     }
 
 

@@ -48,6 +48,10 @@ public class Value {
                 yield buffer2.array();
             }
             case CHAR -> {
+                // TODO: Align CHAR serialization with ValueComparerTest and the
+                // record layer. Tests expect raw string bytes from Value.ToByte(),
+                // while fixed-width 64-byte padding should be handled by the
+                // caller that writes table records.
                 String str = (String) value;
                 ByteBuffer buffer3 = ByteBuffer.allocate(64);
                 buffer3.putInt(str.length());
@@ -77,6 +81,9 @@ public class Value {
                 yield new Value(buffer2.getDouble());
             }
             case CHAR -> {
+                // TODO: Decode the same CHAR format emitted by ToByte(). The
+                // current length-prefixed parser fails on raw bytes such as
+                // "test".getBytes().
                 ByteBuffer buffer3 = ByteBuffer.wrap(bytes);
                 var length = buffer3.getInt();
                 // int is 4 byte

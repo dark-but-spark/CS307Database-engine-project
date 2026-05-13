@@ -181,6 +181,10 @@ public class RecordFileHandle {
      * @throws DBException 如果在创建新页面时发生数据库异常
      */
     public RecordPageHandle CreateNewPageHandle() throws DBException {
+        // TODO: Fix data-page numbering/allocation semantics. Page-management
+        // tests indicate a mismatch around the first full page and the next
+        // auto-allocated page, likely from mixing header page count with data
+        // page ids or incrementing filePages twice.
         Page newPage = bufferPool.NewPage(filename);
         RecordPageHandle pageHandle = new RecordPageHandle(fileHeader, newPage);
 

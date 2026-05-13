@@ -9,7 +9,6 @@ import edu.sustech.cs307.tuple.TableTuple;
 import edu.sustech.cs307.tuple.TempTuple;
 import edu.sustech.cs307.tuple.Tuple;
 
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
@@ -83,16 +82,17 @@ public class UpdateOperator implements PhysicalOperator {
                     newValues.set(index, newValue);
                 }
                 ByteBuf buffer = Unpooled.buffer();
-                for (Value v : newValues) {
-                    String str = "";
-                    if (v.type == ValueType.CHAR) str = (String) v.value;
-                    if (str.length() == 64) {
-                        ByteBuffer temp = ByteBuffer.allocate(64);
-                        temp.put(str.getBytes());
-                        buffer.writeBytes(temp.array());
+                List<ColumnMeta> columns = new ArrayList<>();
+                for (TabCol tabCol : schema) {
+                    for (ColumnMeta columnMeta : seqScanOperator.outputSchema()) {
+                        if (columnMeta.tableName.equals(tabCol.getTableName())
+                                && columnMeta.name.equals(tabCol.getColumnName())) {
+                            columns.add(columnMeta);
+                            break;
+                        }
                     }
-                    else buffer.writeBytes(v.ToByte());
                 }
+                RecordSerializer.writeRow(buffer, newValues, columns);
 
                 fileHandle.UpdateRecord(tuple.getRID(), buffer);
                 updateCount++;

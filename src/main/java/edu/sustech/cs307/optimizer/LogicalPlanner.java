@@ -26,7 +26,7 @@ import edu.sustech.cs307.logicalOperator.ddl.ShowDatabaseExecutor;
 import edu.sustech.cs307.exception.DBException;
 
 public class LogicalPlanner {
-    // TODO(Task 5.1 Complete Command Interface, Task 4 Transaction): Replace
+    // TODO(Task 5.1 Complete Command Interface, Task 4.1 Transaction API): Replace
     // ad-hoc transaction regex parsing with a command parser path that can share
     // statement splitting, semicolon handling, and error reporting with SQL input.
     private static final Pattern BEGIN_PATTERN = Pattern.compile("(?i)^BEGIN(?:\\s+(?:WORK|TRANSACTION))?$");
@@ -57,7 +57,7 @@ public class LogicalPlanner {
             throw new DBException(ExceptionTypes.InvalidSQL(sql, e.getMessage()));
         }
         LogicalOperator operator = null;
-        // Task 2.1 Basic SQL Statement Implementation: parse SQL statements and
+        // Task 2.0 Basic SQL Statement Implementation: parse SQL statements and
         // construct logical operators or execute immediate DDL/transaction commands.
         // Query
         if (stmt instanceof Select selectStmt) {
@@ -113,7 +113,7 @@ public class LogicalPlanner {
         int depth = 0;
         if (plainSelect.getJoins() != null) {
             for (Join join : plainSelect.getJoins()) {
-                // REVIEW(Task 2.2 Advanced Join Operators): Joins are planned as
+                // REVIEW(Task 2.2 Advanced - Join Operators and Advanced SeqScan): Joins are planned as
                 // nested logical joins without optimizer-based join-order selection.
                 root = new LogicalJoinOperator(
                         root,
@@ -137,14 +137,14 @@ public class LogicalPlanner {
     }
 
     private static LogicalOperator handleInsert(DBManager dbManager, Insert insertStmt) {
-        // Task 2.1 Basic SQL - Data Operations: create a logical INSERT node from
+        // Task 2.0.2 Data Operations: create a logical INSERT node from
         // table, column list, and VALUES expressions.
         return new LogicalInsertOperator(insertStmt.getTable().getName(), insertStmt.getColumns(),
                 insertStmt.getValues());
     }
 
     private static LogicalOperator handleUpdate(DBManager dbManager, Update updateStmt) throws DBException {
-        // Task 2.1 Basic SQL - Data Operations: plan UPDATE as table scan plus
+        // Task 2.0.2 Data Operations: plan UPDATE as table scan plus
         // update-set and optional WHERE expression.
         LogicalOperator root = new LogicalTableScanOperator(updateStmt.getTable().getName(), dbManager);
         return new LogicalUpdateOperator(root, updateStmt.getTable().getName(), updateStmt.getUpdateSets(),

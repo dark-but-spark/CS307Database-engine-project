@@ -48,7 +48,7 @@ public class TableTuple extends Tuple {
     }
 
     private Value convertByteBufToValue(ByteBuf byteBuf, ValueType columnType) throws DBException {
-        // Task 2.1 Basic SQL - Table Management Data Types: decode stored column
+        // Task 2.0.1 Table Management - Data Types: decode stored column
         // bytes into typed Value objects for query execution.
         if (columnType == ValueType.INTEGER) {
             return new Value(byteBuf.getLong(0));

@@ -79,7 +79,7 @@ public class PhysicalPlanner {
             throws DBException {
         PhysicalOperator leftOp = generateOperator(dbManager, logicalJoinOp.getLeftInput());
         PhysicalOperator rightOp = generateOperator(dbManager, logicalJoinOp.getRightInput());
-        // Task 2.2 Advanced Join Operators: build a nested-loop join pipeline for
+        // Task 2.2 Advanced - Join Operators and Advanced SeqScan: build a nested-loop join pipeline for
         // join inputs before applying join predicates.
         PhysicalOperator joinOp = new NestedLoopJoinOperator(leftOp, rightOp, logicalJoinOp.getJoinExprs());
 
@@ -161,7 +161,7 @@ public class PhysicalPlanner {
 
         // check the
 
-        // Task 2.1 Basic SQL - INSERT: validated VALUES are passed to the
+        // Task 2.0.2 Data Operations - INSERT: validated VALUES are passed to the
         // physical insert operator for record serialization and storage.
         return new InsertOperator(logicalInsertOp.tableName, columns,
                 values, dbManager);
@@ -206,7 +206,7 @@ public class PhysicalPlanner {
             throw new DBException(ExceptionTypes.InvalidSQL("UPDATE", "Missing SET clause"));
         }
         UpdateSet mergedUpdateSet = mergeUpdateSets(logicalUpdateOp.getColumns());
-        // Task 2.1 Basic SQL - UPDATE: execute UPDATE through a sequential scan
+        // Task 2.0.2 Data Operations - UPDATE: execute UPDATE through a sequential scan
         // and in-place record rewrite for rows satisfying the WHERE clause.
         return new UpdateOperator(scanner, logicalUpdateOp.getTableName(), mergedUpdateSet, logicalUpdateOp.getExpression());
     }

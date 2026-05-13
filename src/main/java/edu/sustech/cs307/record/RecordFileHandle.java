@@ -98,7 +98,7 @@ public class RecordFileHandle {
      *                          并更新位图和页面头信息。如果页面已满，更新文件头以指向下一个空闲页面。最后，解除页面的固定状态并返回新插入记录的RID。
      */
     public RID InsertRecord(ByteBuf buf) throws DBException {
-        // Task 2.1 Basic SQL - Data Operations Durability: insert serialized
+        // Task 2.0.2 Data Operations - Durability: insert serialized
         // records into a data page and mark it dirty for persistence.
         RecordPageHandle pageHandle = create_page_handle();
         int slotNum = BitMap.firstBit(false, pageHandle.bitmap, fileHeader.getNumberOfRecordsPrePage());
@@ -145,7 +145,7 @@ public class RecordFileHandle {
      * @throws DBException 如果在更新过程中发生数据库异常。
      */
     public void UpdateRecord(RID rid, ByteBuf buf) throws DBException {
-        // Task 2.1 Basic SQL - UPDATE: overwrite the target record slot and mark
+        // Task 2.0.2 Data Operations - UPDATE: overwrite the target record slot and mark
         // the page dirty.
         RecordPageHandle pageHandle = FetchPageHandle(rid.pageNum);
         ByteBuf slot = pageHandle.getSlot(rid.slotNum);
@@ -187,7 +187,7 @@ public class RecordFileHandle {
      * @throws DBException 如果在创建新页面时发生数据库异常
      */
     public RecordPageHandle CreateNewPageHandle() throws DBException {
-        // TODO(Task 2.1 Basic SQL - Data Operations Durability): Fix data-page numbering/allocation semantics. Page-management
+        // TODO(Task 2.0.2 Data Operations - Durability): Fix data-page numbering/allocation semantics. Page-management
         // tests indicate a mismatch around the first full page and the next
         // auto-allocated page, likely from mixing header page count with data
         // page ids or incrementing filePages twice.

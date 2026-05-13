@@ -50,7 +50,7 @@ public class UpdateOperator implements PhysicalOperator {
 
     @Override
     public void Begin() throws DBException {
-        // Task 2.1 Basic SQL - UPDATE: scan rows, evaluate WHERE, rewrite matched
+        // Task 2.0.2 Data Operations - UPDATE: scan rows, evaluate WHERE, rewrite matched
         // records, and count affected rows.
         seqScanOperator.Begin();
         RecordFileHandle fileHandle = seqScanOperator.getFileHandle();

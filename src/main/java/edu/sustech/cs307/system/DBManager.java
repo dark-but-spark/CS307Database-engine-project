@@ -118,7 +118,7 @@ public class DBManager {
      * @throws DBException If there is an error during table creation
      */
     public void createTable(String table_name, ArrayList<ColumnMeta> columns) throws DBException {
-        // Task 2.1 Basic SQL - Table Management Persistence: create metadata,
+        // Task 2.0.1 Table Management: create metadata,
         // table directory, and the table data file.
         TableMeta tableMeta = new TableMeta(
                 table_name, columns);
@@ -202,12 +202,12 @@ public class DBManager {
     }
 
     public void beginTransaction() throws DBException {
-        // Task 4 Transaction: expose BEGIN through DBManager for command planning.
+        // Task 4.1 Transaction API: expose BEGIN through DBManager for command planning.
         transactionManager.begin();
     }
 
     public void commitTransaction() throws DBException{
-        // Task 4 Transaction: expose COMMIT and persist runtime state.
+        // Task 4.1 Transaction API: expose COMMIT and persist runtime state.
         transactionManager.commit();
     }
 

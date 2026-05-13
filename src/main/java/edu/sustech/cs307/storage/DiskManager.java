@@ -156,7 +156,7 @@ public class DiskManager {
      *                     如果创建过程中发生任何异常，将抛出DBException。
      */
     public void CreateFile(String filename) throws DBException {
-        // Task 2.1 Basic SQL - Table Management Persistence: create persistent
+        // Task 2.0.1 Table Management - Persistence: create persistent
         // table data files and initialize page-count metadata.
         String real_path = currentDir + "/" + filename;
         File file = new File(real_path);

@@ -25,7 +25,7 @@ public class MetaManager {
     }
 
     public void createTable(TableMeta tableMeta) throws DBException {
-        // Task 2.1 Basic SQL - Table Management Persistence: persist table
+        // Task 2.0.1 Table Management: persist table
         // metadata immediately after creation.
         String tableName = tableMeta.tableName;
         if (tables.containsKey(tableName)) {
@@ -74,7 +74,7 @@ public class MetaManager {
     }
 
     public void saveToJson() throws DBException {
-        // Task 2.1 Basic SQL - Table Management Persistence: store metadata on
+        // Task 2.0.1 Table Management: store metadata on
         // disk so tables survive DB restarts.
         // check the root directory exists
         if (!new File(ROOT_DIR).exists()) {

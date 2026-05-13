@@ -77,6 +77,8 @@ public class FilterOperator implements PhysicalOperator {
      * @return 如果找到则返回true，否则返回false
      */
     private boolean findNext() throws DBException {
+        // Task 2.1.2 Logical/Physical Operators - WHERE: evaluate predicates on
+        // each tuple and return only matching rows.
         // 标记没有找到合适的元组
         currentTuple = null;
 

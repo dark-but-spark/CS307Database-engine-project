@@ -22,6 +22,8 @@ public class ExplainExecutor implements DMLExecutor {
 
     @Override
     public void execute() throws DBException {
+       // Task 2.1.1 Basic DDL - EXPLAIN: print the logical plan generated for a
+       // SELECT statement.
        if(explainStatement.getStatement()==null){
            throw new DBException(ExceptionTypes.UnsupportedCommand(explainStatement.toString()));
        }

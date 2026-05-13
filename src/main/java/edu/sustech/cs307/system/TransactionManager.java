@@ -28,19 +28,22 @@ public class TransactionManager {
 
 
     public void begin() throws DBException {
+        // Task 4 Transaction - begin: snapshot disk state and page-count metadata.
         if (transactionSnapshot != null) {
             throw new DBException(ExceptionTypes.TransactionAlreadyActive());
         }
         transactionSnapshot = createSnapshot();
         transactionFilePages = new HashMap<>(dbManager.getDiskManager().filePages);
         savepoints.clear();
-        // REVIEW: This transaction manager uses directory snapshots instead of
+        // REVIEW(Task 4 Transaction - Snapshot/rollback Design): This transaction manager uses directory snapshots instead of
         // write-ahead logging, so it is suitable for this teaching engine but not
         // for concurrent or large databases.
     }
 
 
     public void commit() throws DBException {
+        // Task 4 Transaction - commit: persist current database state and discard
+        // rollback snapshots.
         dbManager.persistRuntimeState();
         cleanupSnapshot(transactionSnapshot);
         transactionSnapshot = null;
@@ -50,6 +53,7 @@ public class TransactionManager {
 
 
     public void rollback() throws DBException {
+        // Task 4 Transaction - rollback: restore the begin snapshot when active.
         if (transactionSnapshot == null) {
             return;
         }
@@ -62,6 +66,8 @@ public class TransactionManager {
 
 
     public void savepoint(String savepointName) throws DBException {
+        // Task 4 Transaction - savepoint: capture a named snapshot inside the
+        // current transaction.
         requireTransaction();
         savepoints.add(new SavepointSnapshot(
                 savepointName,
@@ -71,6 +77,8 @@ public class TransactionManager {
 
 
     public void rollbackToSavepoint(String savepointName) throws DBException {
+        // Task 4 Transaction - rollbackToSavepoint: restore the latest matching
+        // savepoint snapshot.
         requireTransaction();
         int index = findLatestSavepoint(savepointName);
         if (index < 0) {
@@ -83,6 +91,8 @@ public class TransactionManager {
 
 
     public void releaseSavepoint(String savepointName) throws DBException {
+        // Task 4 Transaction - releaseSavepoint: drop the latest matching
+        // savepoint snapshot without changing database state.
         requireTransaction();
         int index = findLatestSavepoint(savepointName);
         if (index < 0) {

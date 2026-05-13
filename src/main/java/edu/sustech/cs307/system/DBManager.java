@@ -79,6 +79,7 @@ public class DBManager {
      * Each table name is displayed in a separate row within the ASCII borders.
      */
     public void showTables() {
+        // Task 2.1.1 Basic DDL - SHOW TABLES: display persisted table metadata.
         Logger.info("|---------------|");
         Logger.info("|    Tables     |");
         Logger.info("|---------------|");
@@ -86,11 +87,13 @@ public class DBManager {
             Logger.info("|{}|", StringUtils.center(tableName, 15, ' '));
         }
         Logger.info("|---------------|");
-        // REVIEW: showTables currently writes to Logger like other DDL helpers;
+        // REVIEW(Task 2.1.1 Basic DDL - SHOW TABLES): showTables currently writes to Logger like other DDL helpers;
         // returning a result-set operator would make this easier to test.
     }
 
     public void descTable(String table_name) throws DBException {
+        // Task 2.1.1 Basic DDL - DESCRIBE TABLE: display column names and types
+        // from table metadata.
         TableMeta tableMeta = metaManager.getTable(table_name);
         Logger.info("|---------------|---------------|");
         Logger.info("|     Field     |     Type      |");
@@ -101,7 +104,7 @@ public class DBManager {
                     StringUtils.center(columnMeta.type.toString(), 15, ' '));
         }
         Logger.info("|---------------|---------------|");
-        // REVIEW: descTable prints physical ValueType names; SQL type aliases can be
+        // REVIEW(Task 2.1.1 Basic DDL - DESCRIBE TABLE): descTable prints physical ValueType names; SQL type aliases can be
         // added if metadata starts preserving original DDL type names.
     }
 
@@ -115,6 +118,8 @@ public class DBManager {
      * @throws DBException If there is an error during table creation
      */
     public void createTable(String table_name, ArrayList<ColumnMeta> columns) throws DBException {
+        // Task 2.1 Basic SQL - Table Management Persistence: create metadata,
+        // table directory, and the table data file.
         TableMeta tableMeta = new TableMeta(
                 table_name, columns);
         metaManager.createTable(tableMeta);
@@ -140,6 +145,7 @@ public class DBManager {
      *                     errors during deletion
      */
     public void dropTable(String table_name) throws DBException {
+        // Task 2.1.1 Basic DDL - DROP TABLE: remove both table files and metadata.
         if(!isTableExists(table_name)){
             throw new DBException(ExceptionTypes.BadIOError("Table does not exist"));
         }
@@ -196,10 +202,12 @@ public class DBManager {
     }
 
     public void beginTransaction() throws DBException {
+        // Task 4 Transaction: expose BEGIN through DBManager for command planning.
         transactionManager.begin();
     }
 
     public void commitTransaction() throws DBException{
+        // Task 4 Transaction: expose COMMIT and persist runtime state.
         transactionManager.commit();
     }
 

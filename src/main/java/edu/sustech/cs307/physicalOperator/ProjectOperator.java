@@ -16,6 +16,8 @@ public class ProjectOperator implements PhysicalOperator {
     private Tuple currentTuple;
 
     public ProjectOperator(PhysicalOperator child, List<TabCol> outputSchema) { // Use bounded wildcard
+        // Task 2.1.2 Logical/Physical Operators - Projection: resolve SELECT *
+        // to the child schema, otherwise keep the requested output columns.
         this.child = child;
         this.outputSchema = outputSchema;
         if (this.outputSchema.size() == 1 && this.outputSchema.get(0).getTableName().equals("*")) {
@@ -78,7 +80,7 @@ public class ProjectOperator implements PhysicalOperator {
                 }
             }
         }
-        // REVIEW: Ambiguous unqualified columns are resolved to the first matching
+        // REVIEW(Task 2.1.2 Logical/Physical Operators - Projection): Ambiguous unqualified columns are resolved to the first matching
         // child column, matching the current ProjectTuple lookup behavior.
         return projectedSchema;
     }

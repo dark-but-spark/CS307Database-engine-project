@@ -61,6 +61,8 @@ public class DBEntry {
         try {
             while (running) {
                 try {
+                    // Task 5.1 Complete Command Interface: read one interactive command
+                    // and keep the process alive for subsequent user input.
                     LineReader scanner = LineReaderBuilder.builder()
                             .terminal(
                                     TerminalBuilder
@@ -70,6 +72,10 @@ public class DBEntry {
                             )
                             .build();
                     Logger.info("CS307-DB> ");
+                    // TODO(Task 5.1 Complete Command Interface): Accumulate input
+                    // until a semicolon so one SQL statement can span multiple lines.
+                    // TODO(Task 5.1 Complete Command Interface): Split and execute
+                    // multiple semicolon-separated SQL statements from one line/script.
                     sql = scanner.readLine();
                     if (sql.equalsIgnoreCase("exit")) {
                         running = false;
@@ -83,6 +89,10 @@ public class DBEntry {
                     Logger.error("An error occurred. Exiting....");
                 }
                 try {
+                    // Task 5.1 Complete Command Interface: dispatch parsed SQL to
+                    // logical planning, physical planning, execution, and result display.
+                    // TODO(Task 5.2 Exception Handling): Run each parsed command in
+                    // isolation so one failed statement does not stop later statements.
                     LogicalOperator operator = LogicalPlanner.resolveAndPlan(dbManager, sql);
                     if (operator == null) {
                         continue;

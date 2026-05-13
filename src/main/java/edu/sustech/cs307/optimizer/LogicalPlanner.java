@@ -26,6 +26,9 @@ import edu.sustech.cs307.logicalOperator.ddl.ShowDatabaseExecutor;
 import edu.sustech.cs307.exception.DBException;
 
 public class LogicalPlanner {
+    // TODO(Task 5.1 Complete Command Interface, Task 4 Transaction): Replace
+    // ad-hoc transaction regex parsing with a command parser path that can share
+    // statement splitting, semicolon handling, and error reporting with SQL input.
     private static final Pattern BEGIN_PATTERN = Pattern.compile("(?i)^BEGIN(?:\\s+(?:WORK|TRANSACTION))?$");
     private static final Pattern START_TRANSACTION_PATTERN = Pattern.compile("(?i)^START\\s+TRANSACTION$");
     private static final Pattern ROLLBACK_PATTERN = Pattern.compile("(?i)^ROLLBACK(?:\\s+(?:WORK|TRANSACTION))?$");
@@ -40,6 +43,9 @@ public class LogicalPlanner {
         if (sql == null || sql.isBlank()) {
             return null;
         }
+        // TODO(Task 5.1 Complete Command Interface): resolveAndPlan currently
+        // accepts exactly one statement. DBEntry should split batches before this
+        // call, or this layer should expose a batch-planning API.
         if (handleManualTransactionCommand(dbManager, sql)) {
             return null;
         }
@@ -51,6 +57,8 @@ public class LogicalPlanner {
             throw new DBException(ExceptionTypes.InvalidSQL(sql, e.getMessage()));
         }
         LogicalOperator operator = null;
+        // Task 2.1 Basic SQL Statement Implementation: parse SQL statements and
+        // construct logical operators or execute immediate DDL/transaction commands.
         // Query
         if (stmt instanceof Select selectStmt) {
             operator = handleSelect(dbManager, selectStmt);
@@ -63,21 +71,28 @@ public class LogicalPlanner {
             return null;
         }
         else if (stmt instanceof Delete deleteStmt) {
-            // REVIEW: DELETE currently drops the whole table. Keep this marked until
+            // REVIEW(Task 2.1.2 Logical/Physical Operators - DELETE): DELETE currently drops the whole table. Keep this marked until
             // row-level delete planning and a physical delete operator are added.
             dbManager.dropTable(deleteStmt.getTable().getName());
             return null;
         }
         // functional
         else if (stmt instanceof CreateTable createTableStmt) {
+            // REVIEW(Task 2.1.1 Basic DDL - CREATE TABLE): CREATE TABLE is executed
+            // directly during logical planning instead of returning a logical DDL node.
             CreateTableExecutor createTable = new CreateTableExecutor(createTableStmt, dbManager, sql);
             createTable.execute();
             return null;
         } else if (stmt instanceof ExplainStatement explainStatement) {
+            // REVIEW(Task 2.1.1 Basic DDL - EXPLAIN): EXPLAIN is handled as an
+            // immediate side-effect command, so it cannot be composed or tested as
+            // a result-producing operator yet.
             ExplainExecutor explainExecutor = new ExplainExecutor(explainStatement, dbManager);
             explainExecutor.execute();
             return null;
         } else if (stmt instanceof ShowStatement showStatement) {
+            // REVIEW(Task 2.1.1 Basic DDL - SHOW TABLES): SHOW is parsed separately
+            // from normal operator planning and writes output through the executor.
             ShowDatabaseExecutor showDatabaseExecutor = new ShowDatabaseExecutor(showStatement);
             showDatabaseExecutor.execute();
             return null;
@@ -98,6 +113,8 @@ public class LogicalPlanner {
         int depth = 0;
         if (plainSelect.getJoins() != null) {
             for (Join join : plainSelect.getJoins()) {
+                // REVIEW(Task 2.2 Advanced Join Operators): Joins are planned as
+                // nested logical joins without optimizer-based join-order selection.
                 root = new LogicalJoinOperator(
                         root,
                         new LogicalTableScanOperator(join.getRightItem().toString(), dbManager),
@@ -109,18 +126,26 @@ public class LogicalPlanner {
 
         // 在 Join 之后应用 Filter，Filter 的输入是 Join 的结果 (root)
         if (plainSelect.getWhere() != null) {
+            // Task 2.1.2 Logical/Physical Operators - WHERE: attach parsed WHERE
+            // expressions to the logical filter node for later tuple evaluation.
             root = new LogicalFilterOperator(root, plainSelect.getWhere());
         }
+        // Task 2.1.2 Logical/Physical Operators - Projection: preserve SELECT
+        // items in a logical project node instead of always returning SELECT *.
         root = new LogicalProjectOperator(root, plainSelect.getSelectItems());
         return root;
     }
 
     private static LogicalOperator handleInsert(DBManager dbManager, Insert insertStmt) {
+        // Task 2.1 Basic SQL - Data Operations: create a logical INSERT node from
+        // table, column list, and VALUES expressions.
         return new LogicalInsertOperator(insertStmt.getTable().getName(), insertStmt.getColumns(),
                 insertStmt.getValues());
     }
 
     private static LogicalOperator handleUpdate(DBManager dbManager, Update updateStmt) throws DBException {
+        // Task 2.1 Basic SQL - Data Operations: plan UPDATE as table scan plus
+        // update-set and optional WHERE expression.
         LogicalOperator root = new LogicalTableScanOperator(updateStmt.getTable().getName(), dbManager);
         return new LogicalUpdateOperator(root, updateStmt.getTable().getName(), updateStmt.getUpdateSets(),
                 updateStmt.getWhere());

@@ -38,6 +38,8 @@ public class InsertOperator implements PhysicalOperator {
 
     @Override
     public void Begin() throws DBException {
+        // Task 2.1 Basic SQL - INSERT: serialize values into record-sized buffers
+        // and append them through RecordFileHandle.
         try {
             var fileHandle = dbManager.getRecordManager().OpenFile(data_file);
             // Serialize values to ByteBuf

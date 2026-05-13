@@ -25,6 +25,8 @@ import java.util.List;
 
 public class PhysicalPlanner {
     public static PhysicalOperator generateOperator(DBManager dbManager, LogicalOperator logicalOp) throws DBException {
+        // Task 2.1.2 Logical/Physical Operators: lower logical plan nodes into
+        // executable physical operators.
         if (logicalOp instanceof LogicalTableScanOperator tableScanOperator) {
             return handleTableScan(dbManager, tableScanOperator);
         } else if (logicalOp instanceof LogicalFilterOperator filterOperator) {
@@ -59,6 +61,8 @@ public class PhysicalPlanner {
         if (tableMeta.getIndexes() != null && !tableMeta.getIndexes().isEmpty()) {
             throw new RuntimeException("unimplement");
         } else {
+            // Task 2.1.3 Sequential Scan Implementation: use SeqScan as the
+            // default table access path when no usable index is planned.
             return new SeqScanOperator(tableName, dbManager);
         }
     }
@@ -66,6 +70,8 @@ public class PhysicalPlanner {
     private static PhysicalOperator handleFilter(DBManager dbManager, LogicalFilterOperator logicalFilterOp)
             throws DBException {
         PhysicalOperator inputOp = generateOperator(dbManager, logicalFilterOp.getChild());
+        // Task 2.1.2 Logical/Physical Operators - WHERE: wrap the child operator
+        // with runtime predicate filtering.
         return new FilterOperator(inputOp, logicalFilterOp.getWhereExpr());
     }
 
@@ -73,6 +79,8 @@ public class PhysicalPlanner {
             throws DBException {
         PhysicalOperator leftOp = generateOperator(dbManager, logicalJoinOp.getLeftInput());
         PhysicalOperator rightOp = generateOperator(dbManager, logicalJoinOp.getRightInput());
+        // Task 2.2 Advanced Join Operators: build a nested-loop join pipeline for
+        // join inputs before applying join predicates.
         PhysicalOperator joinOp = new NestedLoopJoinOperator(leftOp, rightOp, logicalJoinOp.getJoinExprs());
 
         Collection<Expression> joinFilters = logicalJoinOp.getJoinExprs();
@@ -84,6 +92,8 @@ public class PhysicalPlanner {
     private static PhysicalOperator handleProject(DBManager dbManager, LogicalProjectOperator logicalProjectOp)
             throws DBException {
         PhysicalOperator inputOp = generateOperator(dbManager, logicalProjectOp.getChild());
+        // Task 2.1.2 Logical/Physical Operators - Projection: create the physical
+        // projection operator from resolved output schema.
         return new ProjectOperator(inputOp, logicalProjectOp.getOutputSchema());
     }
 
@@ -151,6 +161,8 @@ public class PhysicalPlanner {
 
         // check the
 
+        // Task 2.1 Basic SQL - INSERT: validated VALUES are passed to the
+        // physical insert operator for record serialization and storage.
         return new InsertOperator(logicalInsertOp.tableName, columns,
                 values, dbManager);
     }
@@ -194,6 +206,8 @@ public class PhysicalPlanner {
             throw new DBException(ExceptionTypes.InvalidSQL("UPDATE", "Missing SET clause"));
         }
         UpdateSet mergedUpdateSet = mergeUpdateSets(logicalUpdateOp.getColumns());
+        // Task 2.1 Basic SQL - UPDATE: execute UPDATE through a sequential scan
+        // and in-place record rewrite for rows satisfying the WHERE clause.
         return new UpdateOperator(scanner, logicalUpdateOp.getTableName(), mergedUpdateSet, logicalUpdateOp.getExpression());
     }
 

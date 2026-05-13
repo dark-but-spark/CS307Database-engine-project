@@ -32,7 +32,7 @@ public class LogicalProjectOperator extends LogicalOperator {
             if (selectItem.getExpression() instanceof AllColumns column) {
                 outputSchema.add(new TabCol("*", "*"));
             } else {
-                // REVIEW: Qualified columns such as t.id are currently stored as
+                // REVIEW(Task 2.1.2 Logical/Physical Operators - Projection): Qualified columns such as t.id are currently stored as
                 // both table and column text. Split Column expressions explicitly.
                 outputSchema.add(new TabCol(selectItem.getExpression().toString(), selectItem.getExpression().toString()));
                 // throw new DBException(ExceptionTypes.NotSupportedOperation(selectItem.getExpression()));

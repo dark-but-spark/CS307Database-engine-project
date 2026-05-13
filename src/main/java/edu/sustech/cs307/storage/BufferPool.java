@@ -75,6 +75,8 @@ public class BufferPool {
      * @throws DBException 如果在获取页面过程中发生数据库异常
      */
     public Page FetchPage(PagePosition position) throws DBException {
+        // Task 1 Storage Management - Buffer Pool: fetch cached pages or load
+        // pages from disk into an available/replacement frame.
         if (pageMap.containsKey(position)) {
             Integer frame_id = pageMap.get(position);
             Page page = pages.get(frame_id);
@@ -129,6 +131,8 @@ public class BufferPool {
      * @param {PageId} page_id 目标页的page_id，不能为INVALID_PAGE_ID
      */
     public boolean FlushPage(PagePosition position) throws DBException {
+        // Task 1 Storage Management - Buffer Pool: persist one cached page and
+        // clear its dirty flag.
         Integer frame_id = pageMap.get(position);
         if (frame_id != null) {
             Page page = pages.get(frame_id);
@@ -148,6 +152,8 @@ public class BufferPool {
      * @throws DBException 如果在分配页面时发生错误
      */
     public Page NewPage(String filename) throws DBException {
+        // Task 1 Storage Management - Buffer Pool: allocate a disk page and bind
+        // it to a buffer frame.
         int frame_id = find_victim_page();
         if (frame_id == -1) {
             return null;
@@ -185,7 +191,7 @@ public class BufferPool {
                 diskManager.FlushPage(page);
                 page.dirty = false;
             }
-            // TODO: Do not remove the Page object from pages; that shifts frame
+            // TODO(Task 1 Storage Management - Buffer Pool): Do not remove the Page object from pages; that shifts frame
             // ids and corrupts pageMap/replacer state. Reset the frame in place,
             // remove its map entry, and return the frame id to freeList.
             pages.remove(frame_id);
@@ -246,7 +252,7 @@ public class BufferPool {
             page.dirty = false;
             freeList.add(i);
         }
-        // REVIEW: The replacer implementations do not expose a reset hook. The
+        // REVIEW(Task 1 Storage Management, Task 4 Transaction): The replacer implementations do not expose a reset hook. The
         // free list is repopulated so subsequent page fetches do not consult stale
         // replacement state until the pool is filled again.
     }

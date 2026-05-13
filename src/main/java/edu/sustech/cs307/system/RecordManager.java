@@ -33,11 +33,13 @@ public class RecordManager {
      * @throws DBException 如果记录大小无效或文件创建失败
      */
     public void CreateFile(String filename, int record_size) throws DBException {
+        // Task 2.1 Basic SQL - Table Management Persistence: initialize the
+        // record-file header page used by table storage.
         if (record_size <= 0 || record_size > MAX_RECORD_SIZE) {
             throw new DBException(ExceptionTypes.InvalidTableWidth(record_size));
         }
         diskManager.CreateFile(filename);
-        // TODO: Reconcile header-page initialization with RecordManagerTest.
+        // TODO(Task 2.1 Basic SQL - Table Management Persistence): Reconcile header-page initialization with RecordManagerTest.
         // The test expects the new file to report one allocated page after
         // CreateFile; keep DiskManager.filePages and RecordFileHeader page
         // counts consistent with the header/data-page convention.
@@ -72,6 +74,8 @@ public class RecordManager {
      * @throws DBException 如果在打开文件过程中发生错误
      */
     public RecordFileHandle OpenFile(String table_name) throws DBException {
+        // Task 2.1 Basic SQL - Data Operations: open table data through the
+        // buffer pool and expose record-file metadata to operators.
         String data_file = String.format("%s/%s", table_name, "data");
         Page page = bufferPool.FetchPage(new PagePosition(data_file, 0));
         RecordFileHeader recordFileHeader = new RecordFileHeader(page.data);

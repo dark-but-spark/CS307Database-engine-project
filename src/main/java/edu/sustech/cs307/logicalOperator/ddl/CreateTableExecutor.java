@@ -28,6 +28,8 @@ public class CreateTableExecutor implements DMLExecutor {
 
     @Override
     public void execute() throws DBException {
+        // Task 2.1.1 Basic DDL - CREATE TABLE: convert parsed column definitions
+        // into table metadata and persistent record storage layout.
         String table = createTableStmt.getTable().getName();
         ArrayList<ColumnMeta> colMapping = new ArrayList<>();
         int offset = 0;

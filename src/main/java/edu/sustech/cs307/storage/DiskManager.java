@@ -91,6 +91,7 @@ public class DiskManager {
      * @throws DBException 如果在读取过程中发生 I/O 错误或偏移量超出范围。
      */
     public void ReadPage(Page page, String filename, int offset, long length) throws DBException {
+        // Task 1 Storage Management: read fixed-size pages from persistent files.
         // 拼接实际文件路径
         String real_path = currentDir + "/" + filename;
         try (FileInputStream fis = new FileInputStream(real_path)) {
@@ -118,6 +119,7 @@ public class DiskManager {
      * @throws DBException 如果在写入过程中发生输入输出错误。
      */
     public void FlushPage(Page page) throws DBException {
+        // Task 1 Storage Management: write fixed-size pages back to disk.
         // 拼接实际文件路径
         String real_path = currentDir + "/" + page.position.filename;
 
@@ -154,6 +156,8 @@ public class DiskManager {
      *                     如果创建过程中发生任何异常，将抛出DBException。
      */
     public void CreateFile(String filename) throws DBException {
+        // Task 2.1 Basic SQL - Table Management Persistence: create persistent
+        // table data files and initialize page-count metadata.
         String real_path = currentDir + "/" + filename;
         File file = new File(real_path);
         if (!file.exists()) {
@@ -175,6 +179,7 @@ public class DiskManager {
 
     // return file start;
     public Integer AllocatePage(String filename) throws DBException {
+        // Task 1 Storage Management: allocate a new page number for a file.
         Integer offset = this.filePages.get(filename);
         if (offset == null) {
             throw new DBException(ExceptionTypes.BadIOError(String.format("File not exists, %s", filename)));
@@ -184,6 +189,7 @@ public class DiskManager {
     }
 
     public void DeleteFile(String filename) throws DBException {
+        // Task 2.1.1 Basic DDL - DROP TABLE: remove persistent table files.
         String real_path = currentDir + "/" + filename;
         File file = new File(real_path);
         if (file.exists()) {

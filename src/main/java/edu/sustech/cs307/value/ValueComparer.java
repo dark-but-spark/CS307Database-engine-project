@@ -15,6 +15,8 @@ import edu.sustech.cs307.exception.ExceptionTypes;
 
 public class ValueComparer {
     public static int compare(Value v1, Value v2) throws DBException {
+        // Task 2.1.2 Logical/Physical Operators - WHERE: compare typed values for
+        // equality and range predicates.
         if (v1 == null) {
             return -1;
         }

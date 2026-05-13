@@ -41,6 +41,8 @@ public class SeqScanOperator implements PhysicalOperator {
 
     @Override
     public boolean hasNext() {
+        // Task 2.1.3 Sequential Scan Implementation: advance page/slot cursors
+        // until the next occupied bitmap slot is found.
         if (!isOpen)
             return false;
         try {
@@ -66,6 +68,8 @@ public class SeqScanOperator implements PhysicalOperator {
 
     @Override
     public void Begin() throws DBException {
+        // Task 2.1.3 Sequential Scan Implementation: open the record file and
+        // initialize scan cursor state.
         try {
             fileHandle = dbManager.getRecordManager().OpenFile(tableName);
             totalPages = fileHandle.getFileHeader().getNumberOfPages();
@@ -105,6 +109,8 @@ public class SeqScanOperator implements PhysicalOperator {
 
     @Override
     public Tuple Current() {
+        // Task 2.1.3 Sequential Scan Implementation: expose the current record as
+        // a TableTuple for downstream operators.
         if (!isOpen || currentRecord == null) {
             return null;
         }

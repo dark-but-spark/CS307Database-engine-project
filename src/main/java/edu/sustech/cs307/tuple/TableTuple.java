@@ -30,6 +30,8 @@ public class TableTuple extends Tuple {
 
     @Override
     public Value getValue(TabCol tabCol) throws DBException {
+        // Task 2.1.2 Logical/Physical Operators - WHERE/Projection: resolve a
+        // requested table column from the serialized record.
         if (!tabCol.getTableName().equals(tableName)) {
             return null;
         }
@@ -46,6 +48,8 @@ public class TableTuple extends Tuple {
     }
 
     private Value convertByteBufToValue(ByteBuf byteBuf, ValueType columnType) throws DBException {
+        // Task 2.1 Basic SQL - Table Management Data Types: decode stored column
+        // bytes into typed Value objects for query execution.
         if (columnType == ValueType.INTEGER) {
             return new Value(byteBuf.getLong(0));
         } else if (columnType == ValueType.CHAR) {

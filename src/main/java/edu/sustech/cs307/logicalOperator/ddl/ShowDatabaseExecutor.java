@@ -13,6 +13,8 @@ public class ShowDatabaseExecutor implements DMLExecutor {
     }
     @Override
     public void execute() throws DBException {
+        // Task 2.1.1 Basic DDL - SHOW: handle supported SHOW commands through
+        // the command executor path.
         String command = showStatement.getName();
         if (command.equalsIgnoreCase("DATABASES")) {
             // we only have one database

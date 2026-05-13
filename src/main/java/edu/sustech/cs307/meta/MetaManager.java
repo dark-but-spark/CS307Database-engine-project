@@ -25,6 +25,8 @@ public class MetaManager {
     }
 
     public void createTable(TableMeta tableMeta) throws DBException {
+        // Task 2.1 Basic SQL - Table Management Persistence: persist table
+        // metadata immediately after creation.
         String tableName = tableMeta.tableName;
         if (tables.containsKey(tableName)) {
             throw new DBException(ExceptionTypes.TableAlreadyExist(tableName));
@@ -37,6 +39,7 @@ public class MetaManager {
     }
 
     public void dropTable(String tableName) throws DBException {
+        // Task 2.1.1 Basic DDL - DROP TABLE: remove table metadata and persist it.
         if (!tables.containsKey(tableName)) {
             throw new DBException(ExceptionTypes.TableDoesNotExist(tableName));
         }
@@ -71,6 +74,8 @@ public class MetaManager {
     }
 
     public void saveToJson() throws DBException {
+        // Task 2.1 Basic SQL - Table Management Persistence: store metadata on
+        // disk so tables survive DB restarts.
         // check the root directory exists
         if (!new File(ROOT_DIR).exists()) {
             // create it

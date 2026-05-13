@@ -20,7 +20,7 @@ public class InMemoryIndexScanOperator implements PhysicalOperator {
 
     @Override
     public boolean hasNext() {
-        // REVIEW: The operator needs table metadata, a RecordFileHandle, and scan bounds
+        // REVIEW(Task 3 Index - In-memory B+ Tree Scan): The operator needs table metadata, a RecordFileHandle, and scan bounds
         // before it can turn index RIDs into tuples. Until the planner provides that
         // context, this is a well-formed empty scan instead of an unfinished stub.
         return false;

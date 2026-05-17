@@ -28,6 +28,7 @@ public class TableMeta {
 
     public TableMeta(String tableName) {
         this.tableName = tableName;
+        this.columns_list = new ArrayList<>();
         this.columns = new HashMap<>();
         this.indexes = new HashMap<>();
         this.indexColumns = new HashMap<>();
@@ -64,7 +65,9 @@ public class TableMeta {
         if (this.columns.containsKey(columnName)) {
             throw new DBException(ExceptionTypes.ColumnAlreadyExist(columnName));
         }
+        column.tableName = tableName;
         this.columns.put(columnName, column);
+        this.columns_list.add(column);
     }
 
     public void dropColumn(String columnName) throws DBException {
@@ -72,6 +75,30 @@ public class TableMeta {
             throw new DBException(ExceptionTypes.ColumnDoesNotExist(columnName));
         }
         this.columns.remove(columnName);
+        this.columns_list.removeIf(column -> column.name.equalsIgnoreCase(columnName));
+        indexColumns.entrySet().removeIf(entry -> {
+            if (entry.getValue().equalsIgnoreCase(columnName)) {
+                indexes.remove(entry.getKey());
+                return true;
+            }
+            return false;
+        });
+        recomputeColumnOffsets();
+    }
+
+    public void rename(String newTableName) {
+        this.tableName = newTableName;
+        for (ColumnMeta column : columns_list) {
+            column.tableName = newTableName;
+        }
+    }
+
+    public void recomputeColumnOffsets() {
+        int offset = 0;
+        for (ColumnMeta column : columns_list) {
+            column.offset = offset;
+            offset += column.len;
+        }
     }
 
     public ColumnMeta getColumnMeta(String columnName) {

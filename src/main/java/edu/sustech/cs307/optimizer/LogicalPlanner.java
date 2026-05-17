@@ -11,6 +11,7 @@ import net.sf.jsqlparser.statement.Commit;
 import net.sf.jsqlparser.statement.ExplainStatement;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.alter.Alter;
 import net.sf.jsqlparser.statement.delete.Delete;
 import net.sf.jsqlparser.statement.drop.Drop;
 import net.sf.jsqlparser.statement.select.*;
@@ -21,6 +22,7 @@ import net.sf.jsqlparser.statement.create.table.CreateTable;
 
 import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.logicalOperator.*;
+import edu.sustech.cs307.logicalOperator.ddl.AlterTableExecutor;
 import edu.sustech.cs307.system.DBManager;
 import edu.sustech.cs307.logicalOperator.ddl.CreateTableExecutor;
 import edu.sustech.cs307.logicalOperator.ddl.ExplainExecutor;
@@ -87,6 +89,10 @@ public class LogicalPlanner {
             // Task 3.1 Index Support - DROP INDEX: remove index metadata and its
             // runtime tree.
             dbManager.dropIndex(dropStmt.getName().getName());
+            return null;
+        } else if (stmt instanceof Alter alterStmt) {
+            AlterTableExecutor alterTableExecutor = new AlterTableExecutor(alterStmt, dbManager);
+            alterTableExecutor.execute();
             return null;
         }
         // functional

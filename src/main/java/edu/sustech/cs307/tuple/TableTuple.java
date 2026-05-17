@@ -50,15 +50,12 @@ public class TableTuple extends Tuple {
     private Value convertByteBufToValue(ByteBuf byteBuf, ValueType columnType) throws DBException {
         // Task 2.0.1 Table Management - Data Types: decode stored column
         // bytes into typed Value objects for query execution.
-        if (columnType == ValueType.INTEGER) {
-            return new Value(byteBuf.getLong(0));
-        } else if (columnType == ValueType.CHAR) {
-            return new Value(byteBuf.getCharSequence(0, 64, java.nio.charset.StandardCharsets.UTF_8).toString());
-        } else if (columnType == ValueType.FLOAT) {
-            return new Value(byteBuf.getDouble(0));
-        } else {
+        if (columnType == ValueType.UNKNOWN) {
             throw new DBException(ExceptionTypes.UnsupportedValueType(columnType));
         }
+        byte[] bytes = new byte[byteBuf.capacity()];
+        byteBuf.getBytes(0, bytes);
+        return Value.FromByte(bytes, columnType);
     }
 
     @Override

@@ -17,7 +17,8 @@ public class TableMeta {
     @JsonIgnore
     public Map<String, ColumnMeta> columns; // 列名 -> 列的元数据
 
-    private Map<String, IndexType> indexes; // 索引信息
+    private Map<String, IndexType> indexes; // index name -> index type
+    private Map<String, String> indexColumns; // index name -> indexed column name
 
     private Map<String, Integer> column_rank;
 
@@ -27,8 +28,10 @@ public class TableMeta {
 
     public TableMeta(String tableName) {
         this.tableName = tableName;
+        this.columns_list = new ArrayList<>();
         this.columns = new HashMap<>();
         this.indexes = new HashMap<>();
+        this.indexColumns = new HashMap<>();
     }
 
     public TableMeta(String tableName, ArrayList<ColumnMeta> columns) {
@@ -36,17 +39,22 @@ public class TableMeta {
         this.columns_list = columns;
         this.columns = new HashMap<>();
         this.indexes = new HashMap<>();
+        this.indexColumns = new HashMap<>();
         for (ColumnMeta column : columns) {
             this.columns.put(column.name, column);
         }
     }
 
     @JsonCreator
-    public TableMeta(@JsonProperty("tableName") String tableName, @JsonProperty("columns_list") ArrayList<ColumnMeta> columns_list, @JsonProperty("indexes")  Map<String, IndexType> indexes) {
+    public TableMeta(@JsonProperty("tableName") String tableName,
+                     @JsonProperty("columns_list") ArrayList<ColumnMeta> columns_list,
+                     @JsonProperty("indexes")  Map<String, IndexType> indexes,
+                     @JsonProperty("indexColumns") Map<String, String> indexColumns) {
         this.tableName = tableName;
         this.columns_list = columns_list;
         this.columns = new HashMap<>();
-        this.indexes = indexes;
+        this.indexes = indexes == null ? new HashMap<>() : indexes;
+        this.indexColumns = indexColumns == null ? new HashMap<>() : indexColumns;
         for (var column : columns_list) {
             this.columns.put(column.name, column);
         }
@@ -57,6 +65,7 @@ public class TableMeta {
         if (this.columns.containsKey(columnName)) {
             throw new DBException(ExceptionTypes.ColumnAlreadyExist(columnName));
         }
+        column.tableName = tableName;
         this.columns.put(columnName, column);
         this.columns_list.add(column);
     }
@@ -66,7 +75,30 @@ public class TableMeta {
             throw new DBException(ExceptionTypes.ColumnDoesNotExist(columnName));
         }
         this.columns.remove(columnName);
-        this.columns_list.removeIf(c -> c.name.equals(columnName));
+        this.columns_list.removeIf(column -> column.name.equalsIgnoreCase(columnName));
+        indexColumns.entrySet().removeIf(entry -> {
+            if (entry.getValue().equalsIgnoreCase(columnName)) {
+                indexes.remove(entry.getKey());
+                return true;
+            }
+            return false;
+        });
+        recomputeColumnOffsets();
+    }
+
+    public void rename(String newTableName) {
+        this.tableName = newTableName;
+        for (ColumnMeta column : columns_list) {
+            column.tableName = newTableName;
+        }
+    }
+
+    public void recomputeColumnOffsets() {
+        int offset = 0;
+        for (ColumnMeta column : columns_list) {
+            column.offset = offset;
+            offset += column.len;
+        }
     }
 
     public ColumnMeta getColumnMeta(String columnName) {
@@ -97,6 +129,50 @@ public class TableMeta {
     }
 
     public void setIndexes(Map<String, IndexType> indexes) {
-        this.indexes = indexes;
+        this.indexes = indexes == null ? new HashMap<>() : indexes;
+    }
+
+    public Map<String, String> getIndexColumns() {
+        return indexColumns;
+    }
+
+    public void setIndexColumns(Map<String, String> indexColumns) {
+        this.indexColumns = indexColumns == null ? new HashMap<>() : indexColumns;
+    }
+
+    public void addIndex(String indexName, String columnName, IndexType indexType) throws DBException {
+        // Task 3.1 Index Support - Metadata: persist CREATE INDEX name, target
+        // column, and index type in table metadata.
+        if (!hasColumn(columnName)) {
+            throw new DBException(ExceptionTypes.ColumnDoesNotExist(columnName));
+        }
+        if (indexes.containsKey(indexName)) {
+            throw new DBException(ExceptionTypes.InvalidSQL("CREATE INDEX", "Index already exists: " + indexName));
+        }
+        indexes.put(indexName, indexType);
+        indexColumns.put(indexName, columnName);
+    }
+
+    public void dropIndex(String indexName) throws DBException {
+        // Task 3.1 Index Support - Metadata: persist DROP INDEX by removing both
+        // the index type and its target column mapping.
+        if (!indexes.containsKey(indexName)) {
+            throw new DBException(ExceptionTypes.InvalidSQL("DROP INDEX", "Index does not exist: " + indexName));
+        }
+        indexes.remove(indexName);
+        indexColumns.remove(indexName);
+    }
+
+    public String getIndexColumn(String indexName) {
+        return indexColumns.get(indexName);
+    }
+
+    public String findIndexOnColumn(String columnName) {
+        for (Map.Entry<String, String> entry : indexColumns.entrySet()) {
+            if (entry.getValue().equalsIgnoreCase(columnName)) {
+                return entry.getKey();
+            }
+        }
+        return null;
     }
 }

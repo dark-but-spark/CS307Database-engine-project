@@ -21,6 +21,7 @@ public class SeqScanOperator implements PhysicalOperator {
     private TableMeta tableMeta;
     private RecordFileHandle fileHandle;
     private Record currentRecord;
+    private RID currentRid;
 
     private int currentPageNum;
     private int currentSlotNum;
@@ -72,9 +73,9 @@ public class SeqScanOperator implements PhysicalOperator {
         // initialize scan cursor state.
         try {
             fileHandle = dbManager.getRecordManager().OpenFile(tableName);
-            totalPages = fileHandle.getFileHeader().getNumberOfPages();
+            totalPages = fileHandle.getFileHeader().getNumberOfPages() - 2;
             recordsPerPage = fileHandle.getFileHeader().getNumberOfRecordsPrePage();
-            currentPageNum = 1; // Start from first page
+            currentPageNum = 0; // Start from first data page; physical page 0 is the file header
             currentSlotNum = 0; // Start from first slot
             isOpen = true;
         } catch (DBException e) {
@@ -91,19 +92,22 @@ public class SeqScanOperator implements PhysicalOperator {
             if (hasNext()) { // Advance to the next record
                 RID rid = new RID(currentPageNum, currentSlotNum);
                 currentRecord = fileHandle.GetRecord(rid);
+                currentRid = new RID(rid);
                 currentSlotNum++;
                 if (currentSlotNum >= recordsPerPage) {
                     currentPageNum++;
                     currentSlotNum = 0;
                 }
                 // readonly
-                fileHandle.UnpinPageHandle(currentPageNum, false);
+                fileHandle.UnpinPageHandle(rid.pageNum, false);
             } else {
                 currentRecord = null;
+                currentRid = null;
             }
         } catch (DBException e) {
             e.printStackTrace(); // Handle exception properly
             currentRecord = null;
+            currentRid = null;
         }
     }
 
@@ -111,10 +115,10 @@ public class SeqScanOperator implements PhysicalOperator {
     public Tuple Current() {
         // Task 2.1.3 Sequential Scan Implementation: expose the current record as
         // a TableTuple for downstream operators.
-        if (!isOpen || currentRecord == null) {
+        if (!isOpen || currentRecord == null || currentRid == null) {
             return null;
         }
-        return new TableTuple(tableName, tableMeta, currentRecord, new RID(this.currentPageNum, this.currentSlotNum - 1));
+        return new TableTuple(tableName, tableMeta, currentRecord, new RID(currentRid));
     }
 
     @Override
@@ -128,6 +132,7 @@ public class SeqScanOperator implements PhysicalOperator {
         }
         fileHandle = null;
         currentRecord = null;
+        currentRid = null;
         isOpen = false;
     }
 

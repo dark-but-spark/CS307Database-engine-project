@@ -18,16 +18,18 @@ import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.alter.Alter;
 import net.sf.jsqlparser.statement.delete.Delete;
+import net.sf.jsqlparser.statement.drop.Drop;
 import net.sf.jsqlparser.statement.select.*;
 import net.sf.jsqlparser.statement.show.ShowTablesStatement;
 import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.statement.insert.Insert;
+import net.sf.jsqlparser.statement.create.index.CreateIndex;
 import net.sf.jsqlparser.statement.create.table.CreateTable;
 
 import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.logicalOperator.*;
-import edu.sustech.cs307.system.DBManager;
 import edu.sustech.cs307.logicalOperator.ddl.AlterTableExecutor;
+import edu.sustech.cs307.system.DBManager;
 import edu.sustech.cs307.logicalOperator.ddl.CreateTableExecutor;
 import edu.sustech.cs307.logicalOperator.ddl.ExplainExecutor;
 import edu.sustech.cs307.logicalOperator.ddl.ShowDatabaseExecutor;
@@ -81,16 +83,27 @@ public class LogicalPlanner {
         else if (stmt instanceof Delete deleteStmt) {
             operator = handleDelete(dbManager, deleteStmt);
         }
+        else if (stmt instanceof CreateIndex createIndexStmt) {
+            // Task 3.1 Index Support - CREATE INDEX: parse one-column index DDL
+            // and build the corresponding runtime B+Tree.
+            handleCreateIndex(dbManager, createIndexStmt);
+            return null;
+        } else if (stmt instanceof Drop dropStmt && "INDEX".equalsIgnoreCase(dropStmt.getType())) {
+            // Task 3.1 Index Support - DROP INDEX: remove index metadata and its
+            // runtime tree.
+            dbManager.dropIndex(dropStmt.getName().getName());
+            return null;
+        } else if (stmt instanceof Alter alterStmt) {
+            AlterTableExecutor alterTableExecutor = new AlterTableExecutor(alterStmt, dbManager);
+            alterTableExecutor.execute();
+            return null;
+        }
         // functional
         else if (stmt instanceof CreateTable createTableStmt) {
             // REVIEW(Task 2.1.1 Basic DDL - CREATE TABLE): CREATE TABLE is executed
             // directly during logical planning instead of returning a logical DDL node.
             CreateTableExecutor createTable = new CreateTableExecutor(createTableStmt, dbManager, sql);
             createTable.execute();
-            return null;
-        } else if (stmt instanceof Alter alterStmt) {
-            AlterTableExecutor alterExecutor = new AlterTableExecutor(alterStmt, dbManager);
-            alterExecutor.execute();
             return null;
         } else if (stmt instanceof ExplainStatement explainStatement) {
             // REVIEW(Task 2.1.1 Basic DDL - EXPLAIN): EXPLAIN is handled as an
@@ -124,6 +137,18 @@ public class LogicalPlanner {
         String tableName = plainSelect.getFromItem().toString();
         LogicalOperator root = new LogicalTableScanOperator(tableName, dbManager);
 
+        int depth = 0;
+        if (plainSelect.getJoins() != null) {
+            for (Join join : plainSelect.getJoins()) {
+                root = new LogicalJoinOperator(
+                        root,
+                        new LogicalTableScanOperator(join.getRightItem().toString(), dbManager),
+                        join.getOnExpressions(),
+                        depth);
+                depth += 1;
+            }
+        }
+
         // Check for COUNT aggregation
         if (isCountQuery(plainSelect)) {
             return buildCountPlan(dbManager, plainSelect, root, tableName);
@@ -137,28 +162,38 @@ public class LogicalPlanner {
             return buildGroupByPlan(dbManager, plainSelect, root, tableName);
         }
 
-        int depth = 0;
-        if (plainSelect.getJoins() != null) {
-            for (Join join : plainSelect.getJoins()) {
-                // REVIEW(Task 2.2 Advanced - Join Operators and Advanced SeqScan): Joins are planned as
-                // nested logical joins without optimizer-based join-order selection.
-                root = new LogicalJoinOperator(
-                        root,
-                        new LogicalTableScanOperator(join.getRightItem().toString(), dbManager),
-                        join.getOnExpressions(),
-                        depth);
-                depth += 1;
-            }
-        }
-
         if (plainSelect.getWhere() != null) {
             root = new LogicalFilterOperator(root, plainSelect.getWhere());
         }
+
         if (plainSelect.getOrderByElements() != null && !plainSelect.getOrderByElements().isEmpty()) {
             root = new LogicalOrderByOperator(root, plainSelect.getOrderByElements());
         }
+
         root = new LogicalProjectOperator(root, plainSelect.getSelectItems());
         return root;
+    }
+
+    private static LogicalOperator handleInsert(DBManager dbManager, Insert insertStmt) {
+        // Task 2.0.2 Data Operations: create a logical INSERT node from
+        // table, column list, and VALUES expressions.
+        return new LogicalInsertOperator(insertStmt.getTable().getName(), insertStmt.getColumns(),
+                insertStmt.getValues());
+    }
+
+    private static LogicalOperator handleUpdate(DBManager dbManager, Update updateStmt) throws DBException {
+        LogicalOperator root = new LogicalTableScanOperator(updateStmt.getTable().getName(), dbManager);
+        return new LogicalUpdateOperator(root, updateStmt.getTable().getName(), updateStmt.getUpdateSets(),
+                updateStmt.getWhere());
+    }
+
+    private static LogicalOperator handleDelete(DBManager dbManager, Delete deleteStmt) throws DBException {
+        if (deleteStmt.getWhere() == null) {
+            dbManager.dropTable(deleteStmt.getTable().getName());
+            return null;
+        }
+        LogicalOperator root = new LogicalTableScanOperator(deleteStmt.getTable().getName(), dbManager);
+        return new LogicalDeleteOperator(root, deleteStmt.getTable().getName(), deleteStmt.getWhere());
     }
 
     private static boolean isCountQuery(PlainSelect plainSelect) {
@@ -245,27 +280,19 @@ public class LogicalPlanner {
                 plainSelect.getSelectItems(), tableName);
     }
 
-    private static LogicalOperator handleInsert(DBManager dbManager, Insert insertStmt) {
-        // Task 2.0.2 Data Operations: create a logical INSERT node from
-        // table, column list, and VALUES expressions.
-        return new LogicalInsertOperator(insertStmt.getTable().getName(), insertStmt.getColumns(),
-                insertStmt.getValues());
-    }
-
-    private static LogicalOperator handleUpdate(DBManager dbManager, Update updateStmt) throws DBException {
-        // Task 2.0.2 Data Operations: plan UPDATE as table scan plus
-        // update-set and optional WHERE expression.
-        LogicalOperator root = new LogicalTableScanOperator(updateStmt.getTable().getName(), dbManager);
-        return new LogicalUpdateOperator(root, updateStmt.getTable().getName(), updateStmt.getUpdateSets(),
-                updateStmt.getWhere());
-    }
-    private static LogicalOperator handleDelete(DBManager dbManager, Delete deleteStmt) throws DBException {
-        if (deleteStmt.getWhere() == null) {
-            dbManager.dropTable(deleteStmt.getTable().getName());
-            return null;
+    private static void handleCreateIndex(DBManager dbManager, CreateIndex createIndexStmt) throws DBException {
+        var index = createIndexStmt.getIndex();
+        if (index == null || index.getName() == null || index.getColumnsNames() == null
+                || index.getColumnsNames().size() != 1) {
+            throw new DBException(ExceptionTypes.InvalidSQL(createIndexStmt.toString(),
+                    "Only single-column CREATE INDEX is supported"));
         }
-        LogicalOperator root = new LogicalTableScanOperator(deleteStmt.getTable().getName(), dbManager);
-        return new LogicalDeleteOperator(root, deleteStmt.getTable().getName(), deleteStmt.getWhere());
+        String using = index.getUsing();
+        if (using != null && !using.equalsIgnoreCase("BTREE") && !using.equalsIgnoreCase("B+TREE")) {
+            throw new DBException(ExceptionTypes.InvalidSQL(createIndexStmt.toString(),
+                    "Only BTREE indexes are supported"));
+        }
+        dbManager.createIndex(index.getName(), createIndexStmt.getTable().getName(), index.getColumnsNames().get(0));
     }
 
     private static String normalizeSql(String sql) {

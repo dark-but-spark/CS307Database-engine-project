@@ -5,11 +5,11 @@ import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.meta.TabCol;
 import edu.sustech.cs307.record.RecordFileHandle;
+import edu.sustech.cs307.system.DBManager;
 import edu.sustech.cs307.tuple.TableTuple;
 import edu.sustech.cs307.tuple.TempTuple;
 import edu.sustech.cs307.tuple.Tuple;
 
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
@@ -23,6 +23,7 @@ import net.sf.jsqlparser.statement.update.UpdateSet;
 
 public class UpdateOperator implements PhysicalOperator {
     private final SeqScanOperator seqScanOperator;
+    private final DBManager dbManager;
     private final String tableName;
     private final UpdateSet updateSet;
     private final Expression whereExpr;
@@ -30,12 +31,13 @@ public class UpdateOperator implements PhysicalOperator {
     private int updateCount;
     private boolean isDone;
 
-    public UpdateOperator(PhysicalOperator inputOperator, String tableName, UpdateSet updateSet,
+    public UpdateOperator(PhysicalOperator inputOperator, DBManager dbManager, String tableName, UpdateSet updateSet,
                           Expression whereExpr) {
         if (!(inputOperator instanceof SeqScanOperator seqScanOperator)) {
             throw new RuntimeException("The delete operator only accepts SeqScanOperator as input");
         }
         this.seqScanOperator = seqScanOperator;
+        this.dbManager = dbManager;
         this.tableName = tableName;
         this.updateSet = updateSet;
         this.whereExpr = whereExpr;
@@ -83,18 +85,22 @@ public class UpdateOperator implements PhysicalOperator {
                     newValues.set(index, newValue);
                 }
                 ByteBuf buffer = Unpooled.buffer();
-                for (Value v : newValues) {
-                    String str = "";
-                    if (v.type == ValueType.CHAR) str = (String) v.value;
-                    if (str.length() == 64) {
-                        ByteBuffer temp = ByteBuffer.allocate(64);
-                        temp.put(str.getBytes());
-                        buffer.writeBytes(temp.array());
+                List<ColumnMeta> columns = new ArrayList<>();
+                for (TabCol tabCol : schema) {
+                    for (ColumnMeta columnMeta : seqScanOperator.outputSchema()) {
+                        if (columnMeta.tableName.equals(tabCol.getTableName())
+                                && columnMeta.name.equals(tabCol.getColumnName())) {
+                            columns.add(columnMeta);
+                            break;
+                        }
                     }
-                    else buffer.writeBytes(v.ToByte());
                 }
+                RecordSerializer.writeRow(buffer, newValues, columns);
 
                 fileHandle.UpdateRecord(tuple.getRID(), buffer);
+                // Task 3.1 Index Support - Dynamic UPDATE Maintenance: keep
+                // indexed keys synchronized after in-place record rewrites.
+                dbManager.updateIndexes(tableName, tuple.getRID(), oldValues, newValues.toArray(new Value[0]));
                 updateCount++;
             }
         }

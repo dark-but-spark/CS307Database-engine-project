@@ -31,4 +31,5 @@ public class ShowDatabaseExecutor implements DMLExecutor {
             throw new DBException(ExceptionTypes.UnsupportedCommand(String.format("SHOW %s", command)));
         }
     }
+
 }

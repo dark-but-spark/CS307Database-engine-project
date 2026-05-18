@@ -48,15 +48,10 @@ public class Value {
                 yield buffer2.array();
             }
             case CHAR -> {
-                // TODO(Task 2.0.1 Table Management - Data Types): Align CHAR serialization with ValueComparerTest and the
-                // record layer. Tests expect raw string bytes from Value.ToByte(),
-                // while fixed-width 64-byte padding should be handled by the
-                // caller that writes table records.
-                String str = (String) value;
-                ByteBuffer buffer3 = ByteBuffer.allocate(64);
-                buffer3.putInt(str.length());
-                buffer3.put(str.getBytes());
-                yield buffer3.array();
+                // REVIEW(Task 2.0.1 Table Management - Data Types): Value-level
+                // CHAR bytes are raw string bytes; fixed-width table storage is
+                // handled by record serialization callers.
+                yield ((String) value).getBytes();
             }
             default -> throw new RuntimeException("Unsupported value type: " + type);
         };
@@ -81,14 +76,14 @@ public class Value {
                 yield new Value(buffer2.getDouble());
             }
             case CHAR -> {
-                // TODO(Task 2.0.1 Table Management - Data Types): Decode the same CHAR format emitted by ToByte(). The
-                // current length-prefixed parser fails on raw bytes such as
-                // "test".getBytes().
-                ByteBuffer buffer3 = ByteBuffer.wrap(bytes);
-                var length = buffer3.getInt();
-                // int is 4 byte
-                String s = new String(bytes, 4, length);
-                yield new Value(s);
+                // REVIEW(Task 2.0.1 Table Management - Data Types): Decode raw
+                // string bytes emitted by ToByte(); trim zero padding from fixed
+                // width record slots when present.
+                int length = bytes.length;
+                while (length > 0 && bytes[length - 1] == 0) {
+                    length--;
+                }
+                yield new Value(new String(bytes, 0, length));
             }
             default -> throw new RuntimeException("Unsupported value type: " + type);
         };
@@ -102,11 +97,7 @@ public class Value {
                 return this.value.toString();
             }
             case CHAR -> {
-                byte[] bytes = ((String) this.value).getBytes();
-                ByteBuffer buffer3 = ByteBuffer.wrap(bytes);
-                var length = buffer3.getInt();
-                // int is 4 byte
-                return new String(bytes, 4, length);
+                return (String) this.value;
             }
             default -> throw new RuntimeException("Unsupported value type: " + type);
         }

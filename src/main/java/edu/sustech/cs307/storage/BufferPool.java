@@ -191,10 +191,12 @@ public class BufferPool {
                 diskManager.FlushPage(page);
                 page.dirty = false;
             }
-            // TODO(Task 1 Storage Management - Buffer Pool): Do not remove the Page object from pages; that shifts frame
-            // ids and corrupts pageMap/replacer state. Reset the frame in place,
-            // remove its map entry, and return the frame id to freeList.
-            pages.remove(frame_id);
+            // REVIEW(Task 1 Storage Management - Buffer Pool): Reset the frame in
+            // place so frame ids in pageMap/replacer remain stable.
+            Arrays.fill(page.data.array(), (byte) 0);
+            page.position = new PagePosition("null", 0);
+            page.pin_count = 0;
+            page.dirty = false;
             pageMap.remove(position);
             freeList.add(frame_id);
             // pin count must be 0

@@ -47,11 +47,25 @@ public class MetaManager {
         saveToJson();
     }
 
+    public void renameTable(String oldTableName, String newTableName) throws DBException {
+        if (!tables.containsKey(oldTableName)) {
+            throw new DBException(ExceptionTypes.TableDoesNotExist(oldTableName));
+        }
+        if (tables.containsKey(newTableName)) {
+            throw new DBException(ExceptionTypes.TableAlreadyExist(newTableName));
+        }
+        TableMeta tableMeta = tables.remove(oldTableName);
+        tableMeta.rename(newTableName);
+        tables.put(newTableName, tableMeta);
+        saveToJson();
+    }
+
     public void addColumnInTable(String tableName, ColumnMeta column) throws DBException {
         if (!tables.containsKey(tableName)) {
             throw new DBException(ExceptionTypes.TableDoesNotExist(tableName));
         }
         this.tables.get(tableName).addColumn(column);
+        saveToJson();
     }
 
     public void dropColumnInTable(String tableName, String columnName) throws DBException {
@@ -59,6 +73,7 @@ public class MetaManager {
             throw new DBException(ExceptionTypes.TableDoesNotExist(tableName));
         }
         this.tables.get(tableName).dropColumn((columnName));
+        saveToJson();
     }
 
     public TableMeta getTable(String tableName) throws DBException {

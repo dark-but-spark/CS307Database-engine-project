@@ -2,8 +2,8 @@ package edu.sustech.cs307.physicalOperator;
 
 import edu.sustech.cs307.exception.DBException;
 import edu.sustech.cs307.meta.ColumnMeta;
+import edu.sustech.cs307.record.RID;
 import edu.sustech.cs307.system.DBManager;
-import edu.sustech.cs307.tuple.TableTuple;
 import edu.sustech.cs307.tuple.TempTuple;
 import edu.sustech.cs307.tuple.Tuple;
 import edu.sustech.cs307.value.Value;
@@ -17,6 +17,7 @@ import java.util.ArrayList;
 public class InsertOperator implements PhysicalOperator {
     private final String data_file;
     private final List<Value> values;
+    private final List<String> columnNames;
     private final DBManager dbManager;
     private final int columnSize;
     private int rowCount;
@@ -24,6 +25,7 @@ public class InsertOperator implements PhysicalOperator {
 
     public InsertOperator(String data_file, List<String> columnNames, List<Value> values, DBManager dbManager) {
         this.data_file = data_file;
+        this.columnNames = columnNames;
         this.values = values;
         this.dbManager = dbManager;
         this.columnSize = columnNames.size();
@@ -42,12 +44,21 @@ public class InsertOperator implements PhysicalOperator {
         // and append them through RecordFileHandle.
         try {
             var fileHandle = dbManager.getRecordManager().OpenFile(data_file);
+            var tableMeta = dbManager.getMetaManager().getTable(data_file);
+            List<ColumnMeta> insertColumns = new ArrayList<>();
+            for (String columnName : columnNames) {
+                insertColumns.add(tableMeta.getColumnMeta(columnName));
+            }
             // Serialize values to ByteBuf
             ByteBuf buffer = Unpooled.buffer();
             for (int i = 0; i < values.size(); i++) {
-                buffer.writeBytes(values.get(i).ToByte());
+                RecordSerializer.writeValue(buffer, values.get(i), insertColumns.get(i % columnSize));
                 if ((columnSize == 1) || ((i + 1) % columnSize == 0 && i != 0)) {
-                    fileHandle.InsertRecord(buffer);
+                    RID rid = fileHandle.InsertRecord(buffer);
+                    Value[] rowValues = values.subList(i + 1 - columnSize, i + 1).toArray(new Value[0]);
+                    // Task 3.1 Index Support - Dynamic INSERT Maintenance: use
+                    // the storage RID returned by InsertRecord to update indexes.
+                    dbManager.insertIntoIndexes(data_file, rid, rowValues);
                     buffer.clear();
                 }
             }

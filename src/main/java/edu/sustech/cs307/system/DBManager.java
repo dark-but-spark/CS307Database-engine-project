@@ -280,6 +280,19 @@ public class DBManager {
         }
     }
 
+    public void deleteFromIndexes(String tableName, RID rid, Value[] rowValues) throws DBException {
+        // Task 3.1 Index Support - Dynamic DELETE Maintenance: remove deleted
+        // rows from every runtime B+Tree defined on this table.
+        // REVIEW(Task 3.1 Index Support - Dynamic DELETE Maintenance): Runtime
+        // indexes are rebuilt lazily from table data when missing, so this only
+        // synchronizes indexes that exist in metadata for the current process.
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        for (String indexName : tableMeta.getIndexes().keySet()) {
+            int columnIndex = indexedColumnPosition(tableMeta, tableMeta.getIndexColumn(indexName));
+            getIndex(tableName, indexName).delete(rowValues[columnIndex], rid);
+        }
+    }
+
     private BPlusTreeIndex rebuildIndex(String tableName, String indexName) throws DBException {
         TableMeta tableMeta = metaManager.getTable(tableName);
         String columnName = tableMeta.getIndexColumn(indexName);

@@ -58,7 +58,7 @@ public abstract class Tuple {
                 table_name = tableTuple.getTableName();
             }
             leftValue = tuple.getValue(new TabCol(table_name, leftColumn.getColumnName()));
-            // TODO(Task 2.1.2 Logical/Physical Operators - WHERE): Guard leftValue before reading type and avoid
+            // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): Guard leftValue before reading type and avoid
             // Value.toString() for CHAR until Value CHAR decoding is fixed.
             if (leftValue.type == ValueType.CHAR) {
                 leftValue = new Value(leftValue.toString());

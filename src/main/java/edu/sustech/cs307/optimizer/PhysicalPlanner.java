@@ -39,6 +39,8 @@ public class PhysicalPlanner {
             return handleInsert(dbManager, insertOperator);
         } else if (logicalOp instanceof LogicalUpdateOperator updateOperator) {
             return handleUpdate(dbManager, updateOperator);
+        } else if (logicalOp instanceof LogicalDeleteOperator deleteOperator) {
+            return handleDelete(dbManager, deleteOperator);
         }
 
         else {
@@ -81,9 +83,10 @@ public class PhysicalPlanner {
         PhysicalOperator joinOp = new NestedLoopJoinOperator(leftOp, rightOp, logicalJoinOp.getJoinExprs());
 
         Collection<Expression> joinFilters = logicalJoinOp.getJoinExprs();
-        PhysicalOperator finalOp = new FilterOperator(joinOp, joinFilters);
-
-        return finalOp;
+        if (joinFilters == null || joinFilters.isEmpty()) {
+            return joinOp;
+        }
+        return new FilterOperator(joinOp, joinFilters);
     }
 
     private static PhysicalOperator handleProject(DBManager dbManager, LogicalProjectOperator logicalProjectOp)
@@ -206,6 +209,16 @@ public class PhysicalPlanner {
         // Task 2.0.2 Data Operations - UPDATE: execute UPDATE through a sequential scan
         // and in-place record rewrite for rows satisfying the WHERE clause.
         return new UpdateOperator(scanner, dbManager, logicalUpdateOp.getTableName(), mergedUpdateSet, logicalUpdateOp.getExpression());
+    }
+
+    private static PhysicalOperator handleDelete(DBManager dbManager, LogicalDeleteOperator logicalDeleteOp) throws DBException {
+        PhysicalOperator scanner = generateOperator(dbManager, logicalDeleteOp.getChild());
+        // Task 2.1.2 Logical/Physical Operators - DELETE: execute row-level
+        // deletion through a sequential scan and WHERE predicate evaluation.
+        // REVIEW(Task 2.1.2 Logical/Physical Operators - DELETE): DeleteOperator
+        // currently requires a SeqScanOperator child; this should be revisited if
+        // DELETE starts using index access paths.
+        return new DeleteOperator(scanner, dbManager, logicalDeleteOp.getTableName(), logicalDeleteOp.getWhereExpr());
     }
 
     private static UpdateSet mergeUpdateSets(List<UpdateSet> updateSets) {

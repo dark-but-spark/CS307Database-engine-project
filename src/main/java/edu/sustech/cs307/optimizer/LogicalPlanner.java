@@ -30,7 +30,7 @@ import edu.sustech.cs307.logicalOperator.ddl.ShowDatabaseExecutor;
 import edu.sustech.cs307.exception.DBException;
 
 public class LogicalPlanner {
-    // TODO(Task 5.1 Complete Command Interface, Task 4.1 Transaction API): Replace
+    // REVIEW(Task 5.1 Complete Command Interface, Task 4.1 Transaction API): Replace
     // ad-hoc transaction regex parsing with a command parser path that can share
     // statement splitting, semicolon handling, and error reporting with SQL input.
     private static final Pattern BEGIN_PATTERN = Pattern.compile("(?i)^BEGIN(?:\\s+(?:WORK|TRANSACTION))?$");
@@ -47,7 +47,7 @@ public class LogicalPlanner {
         if (sql == null || sql.isBlank()) {
             return null;
         }
-        // TODO(Task 5.1 Complete Command Interface): resolveAndPlan currently
+        // REVIEW(Task 5.1 Complete Command Interface): resolveAndPlan currently
         // accepts exactly one statement. DBEntry should split batches before this
         // call, or this layer should expose a batch-planning API.
         if (handleManualTransactionCommand(dbManager, sql)) {
@@ -75,10 +75,7 @@ public class LogicalPlanner {
             return null;
         }
         else if (stmt instanceof Delete deleteStmt) {
-            // REVIEW(Task 2.1.2 Logical/Physical Operators - DELETE): DELETE currently drops the whole table. Keep this marked until
-            // row-level delete planning and a physical delete operator are added.
-            dbManager.dropTable(deleteStmt.getTable().getName());
-            return null;
+            operator = handleDelete(dbManager, deleteStmt);
         }
         else if (stmt instanceof CreateIndex createIndexStmt) {
             // Task 3.1 Index Support - CREATE INDEX: parse one-column index DDL
@@ -168,6 +165,17 @@ public class LogicalPlanner {
         LogicalOperator root = new LogicalTableScanOperator(updateStmt.getTable().getName(), dbManager);
         return new LogicalUpdateOperator(root, updateStmt.getTable().getName(), updateStmt.getUpdateSets(),
                 updateStmt.getWhere());
+    }
+
+    private static LogicalOperator handleDelete(DBManager dbManager, Delete deleteStmt) throws DBException {
+        // Task 2.1.2 Logical/Physical Operators - DELETE: plan DELETE as a table
+        // scan plus an optional WHERE expression, mirroring UPDATE.
+        // REVIEW(Task 2.1.2 Logical/Physical Operators - DELETE): JSqlParser's
+        // single-table Delete path is supported; multi-table delete dialects are
+        // intentionally outside this planner path.
+        String tableName = deleteStmt.getTable().getName();
+        LogicalOperator root = new LogicalTableScanOperator(tableName, dbManager);
+        return new LogicalDeleteOperator(root, tableName, deleteStmt.getWhere());
     }
 
     private static void handleCreateIndex(DBManager dbManager, CreateIndex createIndexStmt) throws DBException {

@@ -72,9 +72,9 @@ public class DBEntry {
                             )
                             .build();
                     Logger.info("CS307-DB> ");
-                    // TODO(Task 5.1 Complete Command Interface): Accumulate input
+                    // REVIEW(Task 5.1 Complete Command Interface): Accumulate input
                     // until a semicolon so one SQL statement can span multiple lines.
-                    // TODO(Task 5.1 Complete Command Interface): Split and execute
+                    // REVIEW(Task 5.1 Complete Command Interface): Split and execute
                     // multiple semicolon-separated SQL statements from one line/script.
                     sql = scanner.readLine();
                     if (sql.equalsIgnoreCase("exit")) {
@@ -91,7 +91,7 @@ public class DBEntry {
                 try {
                     // Task 5.1 Complete Command Interface: dispatch parsed SQL to
                     // logical planning, physical planning, execution, and result display.
-                    // TODO(Task 5.2 Exception Handling): Run each parsed command in
+                    // REVIEW(Task 5.2 Exception Handling): Run each parsed command in
                     // isolation so one failed statement does not stop later statements.
                     LogicalOperator operator = LogicalPlanner.resolveAndPlan(dbManager, sql);
                     if (operator == null) {

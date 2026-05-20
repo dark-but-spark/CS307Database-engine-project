@@ -15,7 +15,9 @@ import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
 import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
+import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
 import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
+import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.select.Values;
 import net.sf.jsqlparser.statement.update.UpdateSet;
 
@@ -66,9 +68,6 @@ public class PhysicalPlanner {
             return new SeqScanOperator(tableName, dbManager);
         }
 
-        // REVIEW(Task 3.1 Index Support - Indexed Access Path): index metadata no
-        // longer blocks SELECT, but the optimizer still falls back to SeqScan
-        // until WHERE predicates are lowered into IndexScanOperator bounds.
         // Task 2.1.3 Sequential Scan Implementation: use SeqScan as the
         // default table access path when no usable index is planned.
         return new SeqScanOperator(tableName, dbManager);
@@ -76,10 +75,83 @@ public class PhysicalPlanner {
 
     private static PhysicalOperator handleFilter(DBManager dbManager, LogicalFilterOperator logicalFilterOp)
             throws DBException {
+        // Task 3.1 Index Support - Indexed Access Path: when the WHERE clause is a
+        // simple column = value equality on an indexed column, lower the predicate
+        // directly into IndexScanOperator and skip SeqScan + FilterOperator.
+        PhysicalOperator indexScan = tryBuildIndexScan(dbManager, logicalFilterOp);
+        if (indexScan != null) {
+            return indexScan;
+        }
+        // REVIEW(Task 3.1 Index Support - Indexed Access Path): Compound WHERE
+        // conditions (AND/OR) and range predicates (>, <, BETWEEN) still fall
+        // through to SeqScanOperator + FilterOperator.
         PhysicalOperator inputOp = generateOperator(dbManager, logicalFilterOp.getChild());
         // Task 2.1.2 Logical/Physical Operators - WHERE: wrap the child operator
         // with runtime predicate filtering.
         return new FilterOperator(inputOp, logicalFilterOp.getWhereExpr());
+    }
+
+    /**
+     * 尝试将等值过滤谓词转换为基于 B+Tree 索引的扫描。
+     *
+     * <p>当前仅处理 {@code WHERE col = literal} 的简单等值条件。
+     * 返回 null 表示无法使用索引，调用者应回退到 SeqScan + FilterOperator。</p>
+     *
+     * <p>REVIEW(Task 3.1 Index Support - Indexed Access Path): Only simple
+     * column = value equality is lowered to index scan. Range predicates
+     * (>, &lt;, BETWEEN) and compound conditions (AND/OR) should be added once
+     * the planner can split AND into individual boundable predicates.</p>
+     *
+     * @param dbManager       数据库管理器
+     * @param logicalFilterOp 逻辑过滤算子
+     * @return 可用的 IndexScanOperator，若无法使用索引则返回 null
+     */
+    private static PhysicalOperator tryBuildIndexScan(DBManager dbManager,
+                                                       LogicalFilterOperator logicalFilterOp) throws DBException {
+        LogicalOperator child = logicalFilterOp.getChild();
+        if (!(child instanceof LogicalTableScanOperator tableScan)) {
+            return null;
+        }
+        Expression whereExpr = logicalFilterOp.getWhereExpr();
+        if (!(whereExpr instanceof EqualsTo equalsTo)) {
+            return null;
+        }
+
+        // 确定哪边是列引用，哪边是字面值
+        Column column;
+        Expression valueExpr;
+        if (equalsTo.getLeftExpression() instanceof Column col) {
+            column = col;
+            valueExpr = equalsTo.getRightExpression();
+        } else if (equalsTo.getRightExpression() instanceof Column col) {
+            column = col;
+            valueExpr = equalsTo.getLeftExpression();
+        } else {
+            return null;
+        }
+
+        String tableName = tableScan.getTableName();
+        String columnName = column.getColumnName();
+
+        // 检查该列是否存在 B+Tree 索引
+        TableMeta tableMeta = dbManager.getMetaManager().getTable(tableName);
+        if (tableMeta.findIndexOnColumn(columnName) == null) {
+            return null;
+        }
+
+        // 将 JSqlParser 字面值转为内部 Value
+        Value searchValue;
+        if (valueExpr instanceof LongValue longValue) {
+            searchValue = new Value(longValue.getValue());
+        } else if (valueExpr instanceof StringValue stringValue) {
+            searchValue = new Value(stringValue.getValue());
+        } else if (valueExpr instanceof DoubleValue doubleValue) {
+            searchValue = new Value(doubleValue.getValue());
+        } else {
+            return null;
+        }
+
+        return new IndexScanOperator(tableName, dbManager, columnName, searchValue);
     }
 
     private static PhysicalOperator handleJoin(DBManager dbManager, LogicalJoinOperator logicalJoinOp)

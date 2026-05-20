@@ -16,22 +16,30 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class DeleteOperator implements PhysicalOperator {
-    private final SeqScanOperator seqScanOperator;
+    private final PhysicalOperator inputOp;
     private final DBManager dbManager;
     private final String tableName;
     private final Expression whereExpr;
 
     private int deleteCount;
     private boolean isDone;
+    private RecordFileHandle fileHandle;
 
     public DeleteOperator(PhysicalOperator inputOperator, DBManager dbManager, String tableName, Expression whereExpr) {
-        // REVIEW(Task 2.1.2 Logical/Physical Operators - DELETE): Row deletion
-        // is tied to SeqScanOperator because it needs stable RIDs from table
-        // storage; indexed delete should provide the same RID contract.
-        if (!(inputOperator instanceof SeqScanOperator seqScanOperator)) {
-            throw new RuntimeException("The delete operator only accepts SeqScanOperator as input");
+        // Task 3.1 Index Support - Dynamic DELETE Maintenance: DeleteOperator now
+        // accepts both SeqScanOperator and IndexScanOperator as its input pipeline,
+        // since both provide stable RIDs for record deletion.
+        // REVIEW(Task 3.1 Index Support - Dynamic DELETE Maintenance): The
+        // RecordFileHandle is extracted during Begin() because the scan operator
+        // initializes it lazily. A common ScanOperator interface would eliminate
+        // the instanceof dispatch here.
+        if (!(inputOperator instanceof SeqScanOperator)
+                && !(inputOperator instanceof IndexScanOperator)) {
+            throw new RuntimeException(
+                    "DeleteOperator requires SeqScanOperator or IndexScanOperator, got: "
+                            + inputOperator.getClass().getSimpleName());
         }
-        this.seqScanOperator = seqScanOperator;
+        this.inputOp = inputOperator;
         this.dbManager = dbManager;
         this.tableName = tableName;
         this.whereExpr = whereExpr;
@@ -46,14 +54,21 @@ public class DeleteOperator implements PhysicalOperator {
 
     @Override
     public void Begin() throws DBException {
-        seqScanOperator.Begin();
-        RecordFileHandle fileHandle = seqScanOperator.getFileHandle();
+        inputOp.Begin();
+        // Extract fileHandle after Begin() so RecordFileHandle is initialized.
+        if (inputOp instanceof SeqScanOperator seqScan) {
+            this.fileHandle = seqScan.getFileHandle();
+        } else if (inputOp instanceof IndexScanOperator indexScan) {
+            this.fileHandle = indexScan.getFileHandle();
+        } else {
+            throw new RuntimeException("Unexpected scan operator type: " + inputOp.getClass().getSimpleName());
+        }
         List<RID> toDelete = new ArrayList<>();
         List<Value[]> deletedValues = new ArrayList<>();
 
-        while (seqScanOperator.hasNext()) {
-            seqScanOperator.Next();
-            TableTuple tuple = (TableTuple) seqScanOperator.Current();
+        while (inputOp.hasNext()) {
+            inputOp.Next();
+            TableTuple tuple = (TableTuple) inputOp.Current();
 
             if (whereExpr == null || tuple.eval_expr(whereExpr)) {
                 toDelete.add(new RID(tuple.getRID()));
@@ -90,7 +105,7 @@ public class DeleteOperator implements PhysicalOperator {
 
     @Override
     public void Close() {
-        seqScanOperator.Close();
+        inputOp.Close();
     }
 
     @Override

@@ -44,6 +44,9 @@ public class TransactionManager {
     public void commit() throws DBException {
         // Task 4.2 Transaction Q&A - commit design: persist current database state and discard
         // rollback snapshots.
+        if (transactionSnapshot == null) {
+            return;
+        }
         dbManager.persistRuntimeState();
         cleanupSnapshot(transactionSnapshot);
         transactionSnapshot = null;

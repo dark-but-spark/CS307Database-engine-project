@@ -90,7 +90,21 @@ public class MaxMinOperator implements PhysicalOperator {
     public ArrayList<ColumnMeta> outputSchema() {
         ArrayList<ColumnMeta> schema = new ArrayList<>();
         String colName = isMax ? "max" : "min";
-        schema.add(new ColumnMeta("", colName, ValueType.INTEGER, 0, 0));
+        ColumnMeta inputColumn = resolveInputColumn();
+        ValueType outputType = inputColumn == null ? ValueType.INTEGER : inputColumn.type;
+        int outputLength = inputColumn == null ? 0 : inputColumn.len;
+        schema.add(new ColumnMeta("", colName, outputType, outputLength, 0));
         return schema;
+    }
+
+    private ColumnMeta resolveInputColumn() {
+        for (ColumnMeta columnMeta : child.outputSchema()) {
+            boolean tableMatches = tableName == null || tableName.isBlank()
+                    || tableName.equalsIgnoreCase(columnMeta.tableName);
+            if (tableMatches && columnName.equalsIgnoreCase(columnMeta.name)) {
+                return columnMeta;
+            }
+        }
+        return null;
     }
 }

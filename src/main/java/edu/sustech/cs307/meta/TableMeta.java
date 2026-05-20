@@ -86,6 +86,16 @@ public class TableMeta {
         recomputeColumnOffsets();
     }
 
+    public void renameColumn(String oldName, String newName) throws DBException {
+        if (!this.columns.containsKey(oldName)) {
+            throw new DBException(ExceptionTypes.ColumnDoesNotExist(oldName));
+        }
+        ColumnMeta columnMeta = this.columns.remove(oldName);
+        columnMeta.name = newName;
+        this.columns.put(newName, columnMeta);
+        this.columns_list.replaceAll(col -> col.name.equalsIgnoreCase(oldName) ? columnMeta : col);
+    }
+
     public void rename(String newTableName) {
         this.tableName = newTableName;
         for (ColumnMeta column : columns_list) {

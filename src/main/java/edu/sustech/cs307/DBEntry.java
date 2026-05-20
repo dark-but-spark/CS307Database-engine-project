@@ -23,6 +23,7 @@ import org.pmw.tinylog.Logger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
@@ -56,68 +57,53 @@ public class DBEntry {
             return;
         }
 
-        String sql = "";
         boolean running = true;
         try {
+            LineReader scanner = LineReaderBuilder.builder()
+                    .terminal(
+                            TerminalBuilder
+                                    .builder()
+                                    .dumb(true)
+                                    .build()
+                    )
+                    .build();
+            StringBuilder pendingSql = new StringBuilder();
             while (running) {
+                List<String> statements = List.of();
                 try {
                     // Task 5.1 Complete Command Interface: read one interactive command
                     // and keep the process alive for subsequent user input.
-                    LineReader scanner = LineReaderBuilder.builder()
-                            .terminal(
-                                    TerminalBuilder
-                                            .builder()
-                                            .dumb(true)
-                                            .build()
-                            )
-                            .build();
-                    Logger.info("CS307-DB> ");
-                    // REVIEW(Task 5.1 Complete Command Interface): Accumulate input
-                    // until a semicolon so one SQL statement can span multiple lines.
-                    // REVIEW(Task 5.1 Complete Command Interface): Split and execute
-                    // multiple semicolon-separated SQL statements from one line/script.
-                    sql = scanner.readLine();
-                    if (sql.equalsIgnoreCase("exit")) {
+                    Logger.info(pendingSql.isEmpty() ? "CS307-DB> " : "      ...> ");
+                    String line = scanner.readLine();
+                    if (pendingSql.isEmpty() && line.equalsIgnoreCase("exit")) {
                         running = false;
                         continue;
-                    } else if (sql.equalsIgnoreCase("help")) {
+                    } else if (pendingSql.isEmpty() && line.equalsIgnoreCase("help")) {
                         printHelp();
+                        continue;
+                    }
+                    if (!pendingSql.isEmpty()) {
+                        pendingSql.append('\n');
+                    }
+                    pendingSql.append(line);
+                    SqlBatch batch = splitSqlBatch(pendingSql.toString());
+                    statements = batch.statements();
+                    pendingSql = new StringBuilder(batch.remainder());
+                    if (statements.isEmpty()) {
                         continue;
                     }
                 } catch (Exception e) {
                     Logger.error(e.getMessage());
                     Logger.error("An error occurred. Exiting....");
                 }
-                try {
-                    // Task 5.1 Complete Command Interface: dispatch parsed SQL to
-                    // logical planning, physical planning, execution, and result display.
-                    // REVIEW(Task 5.2 Exception Handling): Run each parsed command in
-                    // isolation so one failed statement does not stop later statements.
-                    LogicalOperator operator = LogicalPlanner.resolveAndPlan(dbManager, sql);
-                    if (operator == null) {
-                        continue;
+                for (String statement : statements) {
+                    try {
+                        executeStatement(dbManager, statement);
+                    } catch (DBException e) {
+                        Logger.error(e.getMessage());
+                        Logger.error("An error occurred. Please try again.");
+                        Logger.error(Arrays.toString(e.getStackTrace()));
                     }
-                    PhysicalOperator physicalOperator = PhysicalPlanner.generateOperator(dbManager, operator);
-                    if (physicalOperator == null) {
-                        Logger.info(operator);
-                        continue;
-                    }
-                    Logger.info(getStartEndLine(physicalOperator.outputSchema().size(), true));
-                    Logger.info(getHeaderString(physicalOperator.outputSchema()));
-                    Logger.info(getSperator(physicalOperator.outputSchema().size()));
-                    physicalOperator.Begin();
-                    while (physicalOperator.hasNext()) {
-                        physicalOperator.Next();
-                        Tuple tuple = physicalOperator.Current();
-                        Logger.info(getRecordString(tuple));
-                        Logger.info(getSperator(physicalOperator.outputSchema().size()));
-                    }
-                    physicalOperator.Close();
-                    dbManager.getBufferPool().FlushAllPages("");
-                } catch (DBException e) {
-                    Logger.error(e.getMessage());
-                    Logger.error("An error occurred. Please try again.");
-                    Logger.error(Arrays.toString(e.getStackTrace()));
                 }
             }
         } catch (Exception e) {
@@ -126,6 +112,68 @@ public class DBEntry {
             dbManager.getBufferPool().FlushAllPages("");
             Logger.error("Some error occurred. Exiting after persistdata...");
         }
+    }
+
+    static SqlBatch splitSqlBatch(String sql) {
+        ArrayList<String> statements = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inSingleQuote = false;
+        for (int i = 0; i < sql.length(); i++) {
+            char ch = sql.charAt(i);
+            if (ch == '\'') {
+                current.append(ch);
+                if (inSingleQuote && i + 1 < sql.length() && sql.charAt(i + 1) == '\'') {
+                    current.append(sql.charAt(++i));
+                } else {
+                    inSingleQuote = !inSingleQuote;
+                }
+                continue;
+            }
+            if (ch == ';' && !inSingleQuote) {
+                String statement = current.toString().trim();
+                if (!statement.isEmpty()) {
+                    statements.add(statement);
+                }
+                current.setLength(0);
+            } else {
+                current.append(ch);
+            }
+        }
+        return new SqlBatch(statements, current.toString());
+    }
+
+    private static void executeStatement(DBManager dbManager, String sql) throws DBException {
+        // Task 5.1 Complete Command Interface: dispatch parsed SQL to logical
+        // planning, physical planning, execution, and result display.
+        // REVIEW(Task 5.2 Exception Handling): main() invokes this per parsed
+        // statement so one failed statement does not stop later statements.
+        LogicalOperator operator = LogicalPlanner.resolveAndPlan(dbManager, sql);
+        if (operator == null) {
+            return;
+        }
+        PhysicalOperator physicalOperator = PhysicalPlanner.generateOperator(dbManager, operator);
+        if (physicalOperator == null) {
+            Logger.info(operator);
+            return;
+        }
+        Logger.info(getStartEndLine(physicalOperator.outputSchema().size(), true));
+        Logger.info(getHeaderString(physicalOperator.outputSchema()));
+        Logger.info(getSperator(physicalOperator.outputSchema().size()));
+        physicalOperator.Begin();
+        try {
+            while (physicalOperator.hasNext()) {
+                physicalOperator.Next();
+                Tuple tuple = physicalOperator.Current();
+                Logger.info(getRecordString(tuple));
+                Logger.info(getSperator(physicalOperator.outputSchema().size()));
+            }
+        } finally {
+            physicalOperator.Close();
+            dbManager.getBufferPool().FlushAllPages("");
+        }
+    }
+
+    record SqlBatch(List<String> statements, String remainder) {
     }
 
     private static String getHeaderString(ArrayList<ColumnMeta> columnMetas) {

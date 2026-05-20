@@ -111,6 +111,8 @@ public class DBManager {
         Logger.info("|---------------|");
         // REVIEW(Task 2.1.1 Basic DDL - SHOW TABLES): showTables currently writes to Logger like other DDL helpers;
         // returning a result-set operator would make this easier to test.
+        // TODO(Task 2.1.1): Return SHOW TABLES as a result-set operator instead
+        // of formatting directly in DBManager.
     }
 
     public void descTable(String table_name) throws DBException {
@@ -128,6 +130,8 @@ public class DBManager {
         Logger.info("|---------------|---------------|");
         // REVIEW(Task 2.1.1 Basic DDL - DESCRIBE TABLE): descTable prints physical ValueType names; SQL type aliases can be
         // added if metadata starts preserving original DDL type names.
+        // TODO(Task 2.1.1): Preserve original SQL type aliases and return
+        // DESCRIBE output as tuples for consistent CLI/test behavior.
     }
 
     /**
@@ -184,6 +188,10 @@ public class DBManager {
     }
 
     public void addColumn(String tableName, String columnName, String dataType) throws DBException {
+        addColumn(tableName, columnName, dataType, null);
+    }
+
+    public void addColumn(String tableName, String columnName, String dataType, Value defaultValue) throws DBException {
         TableMeta tableMeta = metaManager.getTable(tableName);
         List<Value[]> oldRows = readAllRows(tableName);
         ValueType valueType = parseColumnType(dataType);
@@ -197,7 +205,7 @@ public class DBManager {
         for (Value[] row : oldRows) {
             Value[] rewrittenRow = new Value[row.length + 1];
             System.arraycopy(row, 0, rewrittenRow, 0, row.length);
-            rewrittenRow[row.length] = defaultValue(valueType);
+            rewrittenRow[row.length] = defaultValue != null ? defaultValue : defaultValue(valueType);
             rewrittenRows.add(rewrittenRow);
         }
         rewriteTableData(tableName, tableMeta, rewrittenRows);
@@ -209,6 +217,8 @@ public class DBManager {
         if (tableMeta.columnCount() <= 1) {
             throw new DBException(ExceptionTypes.TableHasNoColumn(tableName));
         }
+        // DONE: TableMeta.dropColumn implicitly drops indexes on the dropped
+        // column and its index definitions.
         int droppedColumnIndex = indexedColumnPosition(tableMeta, columnName);
         List<Value[]> oldRows = readAllRows(tableName);
         tableMeta.dropColumn(columnName);
@@ -225,6 +235,17 @@ public class DBManager {
         }
         rewriteTableData(tableName, tableMeta, rewrittenRows);
         metaManager.saveToJson();
+    }
+
+    public void renameColumn(String tableName, String oldColumnName, String newColumnName) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        if (tableMeta.hasColumn(newColumnName)) {
+            throw new DBException(ExceptionTypes.ColumnAlreadyExist(newColumnName));
+        }
+        tableMeta.renameColumn(oldColumnName, newColumnName);
+        runtimeIndexes.keySet().removeIf(key -> key.startsWith(tableName + "#"));
+        metaManager.saveToJson();
+        Logger.info("Renamed column {} to {} in table {}", oldColumnName, newColumnName, tableName);
     }
 
     public void renameTable(String oldTableName, String newTableName) throws DBException {
@@ -249,6 +270,31 @@ public class DBManager {
         }
         runtimeIndexes.keySet().removeIf(key -> key.startsWith(oldTableName + "#"));
         metaManager.renameTable(oldTableName, newTableName);
+    }
+
+    public void modifyColumn(String tableName, String columnName, String dataType) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        ValueType newType = parseColumnType(dataType);
+        List<Value[]> oldRows = readAllRows(tableName);
+        int columnIndex = indexedColumnPosition(tableMeta, columnName);
+        int newLen = valueLength(newType);
+        ColumnMeta columnMeta = tableMeta.getColumnMeta(columnName);
+        columnMeta.type = newType;
+        columnMeta.len = newLen;
+        tableMeta.recomputeColumnOffsets();
+        List<Value[]> rewrittenRows = new ArrayList<>();
+        for (Value[] row : oldRows) {
+            Value oldValue = row[columnIndex];
+            Value convertedValue = oldValue == null || oldValue.value == null
+                    ? defaultValue(newType)
+                    : convertValue(oldValue, newType);
+            row[columnIndex] = convertedValue;
+            rewrittenRows.add(row);
+        }
+        runtimeIndexes.keySet().removeIf(key -> key.startsWith(tableName + "#"));
+        rewriteTableData(tableName, tableMeta, rewrittenRows);
+        metaManager.saveToJson();
+        Logger.info("Modified column {} to type {} in table {}", columnName, dataType, tableName);
     }
 
     public BPlusTreeIndex getIndex(String tableName, String indexName) throws DBException {
@@ -383,7 +429,7 @@ public class DBManager {
         return recordSize;
     }
 
-    private ValueType parseColumnType(String dataType) throws DBException {
+    public ValueType parseColumnType(String dataType) throws DBException {
         if (dataType == null) {
             throw new DBException(ExceptionTypes.UnsupportedCommand("ALTER TABLE ADD COLUMN"));
         }
@@ -399,7 +445,7 @@ public class DBManager {
         throw new DBException(ExceptionTypes.UnsupportedCommand("ALTER TABLE ADD COLUMN " + dataType));
     }
 
-    private int valueLength(ValueType valueType) throws DBException {
+    public int valueLength(ValueType valueType) throws DBException {
         return switch (valueType) {
             case CHAR -> Value.CHAR_SIZE;
             case INTEGER -> Value.INT_SIZE;
@@ -414,6 +460,22 @@ public class DBManager {
             case INTEGER -> new Value(0L);
             case FLOAT -> new Value(0.0);
             default -> throw new DBException(ExceptionTypes.UnsupportedValueType(valueType));
+        };
+    }
+
+    private Value convertValue(Value oldValue, ValueType newType) throws DBException {
+        if (oldValue.type == newType) {
+            return oldValue;
+        }
+        return switch (newType) {
+            case INTEGER -> {
+                long intVal = oldValue.type == ValueType.INTEGER ? (Long) oldValue.value
+                        : ((Number) oldValue.value).longValue();
+                yield new Value(intVal, ValueType.INTEGER);
+            }
+            case FLOAT -> new Value(((Number) oldValue.value).doubleValue(), ValueType.FLOAT);
+            case CHAR -> new Value(oldValue.value.toString(), ValueType.CHAR);
+            default -> throw new DBException(ExceptionTypes.UnsupportedValueType(newType));
         };
     }
 

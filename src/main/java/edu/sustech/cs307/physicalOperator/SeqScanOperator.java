@@ -51,11 +51,15 @@ public class SeqScanOperator implements PhysicalOperator {
             if (currentPageNum <= totalPages) {
                 while (currentPageNum <= totalPages) {
                     RecordPageHandle pageHandle = fileHandle.FetchPageHandle(currentPageNum);
-                    while (currentSlotNum < recordsPerPage) {
-                        if (BitMap.isSet(pageHandle.bitmap, currentSlotNum)) {
-                            return true; // Found next record
+                    try {
+                        while (currentSlotNum < recordsPerPage) {
+                            if (BitMap.isSet(pageHandle.bitmap, currentSlotNum)) {
+                                return true; // Found next record
+                            }
+                            currentSlotNum++;
                         }
-                        currentSlotNum++;
+                    } finally {
+                        fileHandle.UnpinPageHandle(currentPageNum, false);
                     }
                     currentPageNum++;
                     currentSlotNum = 0; // Reset slot num for new page
@@ -98,8 +102,6 @@ public class SeqScanOperator implements PhysicalOperator {
                     currentPageNum++;
                     currentSlotNum = 0;
                 }
-                // readonly
-                fileHandle.UnpinPageHandle(rid.pageNum, false);
             } else {
                 currentRecord = null;
                 currentRid = null;

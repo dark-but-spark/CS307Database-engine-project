@@ -45,18 +45,12 @@ public class CreateTableExecutor implements DMLExecutor {
                         ExceptionTypes.InvalidSQL(sql, String.format("INVALID COLUMN NAME = %s", colName)));
             }
             ColDataType colType = col.getColDataType();
-            if (colType.getDataType().equalsIgnoreCase("char")) {
-                colMapping.add(new ColumnMeta(table, colName, ValueType.CHAR, Value.CHAR_SIZE, offset));
-                offset += Value.CHAR_SIZE;
-            } else if (colType.getDataType().equalsIgnoreCase("int")) {
-                colMapping.add(new ColumnMeta(table, colName, ValueType.INTEGER, Value.INT_SIZE, offset));
-                offset += Value.INT_SIZE;
-            } else if (colType.getDataType().equalsIgnoreCase("float")) {
-                colMapping.add(new ColumnMeta(table, colName, ValueType.FLOAT, Value.FLOAT_SIZE, offset));
-                offset += Value.FLOAT_SIZE;
-            } else {
-                throw new DBException(ExceptionTypes.UnsupportedCommand(String.format("CREATE TABLE %s", table)));
-            }
+            // DONE: Shared type parsing via dbManager.parseColumnType() and
+            // dbManager.valueLength(). Now accepts varchar/integer/double aliases.
+            ValueType valueType = dbManager.parseColumnType(colType.getDataType());
+            int length = dbManager.valueLength(valueType);
+            colMapping.add(new ColumnMeta(table, colName, valueType, length, offset));
+            offset += length;
         }
         dbManager.createTable(table, colMapping);
         Logger.info("Successfully created table: {}", table); // Modified to Tinylog format

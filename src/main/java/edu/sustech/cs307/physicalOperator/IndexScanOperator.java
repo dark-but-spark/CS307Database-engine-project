@@ -33,6 +33,9 @@ import java.util.Map.Entry;
  * <p>REVIEW(Task 3.1 Index Support - B+Tree Index Scan): IndexScanOperator 每次 Begin()
  * 会从 FileHandle 逐条按 RID 读取记录。当结果集很大时，这会产生大量随机 I/O。
  * 可以引入批量预取（batch RID → page lookup）来减少 pin/unpin 开销。</p>
+ *
+ * <p>TODO(Task 3.1): Add streaming index iterators and optional page-batched RID
+ * lookup so large range scans do not materialize every RID up front.</p>
  */
 public class IndexScanOperator implements PhysicalOperator {
 
@@ -160,9 +163,7 @@ public class IndexScanOperator implements PhysicalOperator {
                     // 只有上界：<= high 或 < high
                     rangeIter = index.LessThan(highValue, highInclusive);
                 } else {
-                    // REVIEW(Task 3.1 Index Support - Index Range Scan): 无边界的范围扫描
-                    // 应等价于全表扫描; 当前返回空结果以避免意外全量读取。
-                    rangeIter = List.<Entry<Value, RID>>of().iterator();
+                    rangeIter = index.All();
                 }
                 while (rangeIter.hasNext()) {
                     indexResults.add(rangeIter.next());
@@ -193,8 +194,6 @@ public class IndexScanOperator implements PhysicalOperator {
         try {
             Record record = fileHandle.GetRecord(rid);
             currentTuple = new TableTuple(tableName, tableMeta, record, new RID(rid));
-            // 读取完成后释放页面 pin
-            fileHandle.UnpinPageHandle(rid.pageNum, false);
         } catch (DBException e) {
             currentTuple = null;
         }
@@ -225,7 +224,14 @@ public class IndexScanOperator implements PhysicalOperator {
 
     @Override
     public ArrayList<ColumnMeta> outputSchema() {
-        return tableMeta != null ? tableMeta.columns_list : new ArrayList<>();
+        if (tableMeta != null) {
+            return tableMeta.columns_list;
+        }
+        try {
+            return dbManager.getMetaManager().getTable(tableName).columns_list;
+        } catch (DBException e) {
+            return new ArrayList<>();
+        }
     }
 
     // ==================== 辅助方法 ====================

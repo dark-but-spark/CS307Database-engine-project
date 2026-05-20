@@ -1,6 +1,7 @@
 package edu.sustech.cs307.physicalOperator;
 
 import edu.sustech.cs307.exception.DBException;
+import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.meta.TabCol;
 import edu.sustech.cs307.tuple.Tuple;
@@ -50,7 +51,10 @@ public class OrderByOperator implements PhysicalOperator {
             }
         }
 
-        Comparator<Tuple> comparator = buildComparator();
+        // TODO(Task 2.2): Add NULL ordering semantics and an external-sort path
+        // for result sets that do not fit comfortably in memory.
+        List<SortKey> sortKeys = buildSortKeys();
+        Comparator<Tuple> comparator = buildComparator(sortKeys);
         sortedTuples.sort(comparator);
     }
 
@@ -83,29 +87,23 @@ public class OrderByOperator implements PhysicalOperator {
         return child.outputSchema();
     }
 
-    private Comparator<Tuple> buildComparator() {
-        ArrayList<ColumnMeta> schema = child.outputSchema();
-
+    private Comparator<Tuple> buildComparator(List<SortKey> sortKeys) {
         return (a, b) -> {
-            for (OrderByElement element : orderByElements) {
-                Expression expr = element.getExpression();
-                boolean asc = !element.isAscDescPresent() || element.isAsc();
-
+            for (SortKey key : sortKeys) {
                 Value va;
                 Value vb;
                 try {
-                    if (expr instanceof Column col) {
-                        TabCol resolved = resolveColumn(col, schema);
-                        va = a.getValue(resolved);
-                        vb = b.getValue(resolved);
+                    if (key.column() != null) {
+                        va = a.getValue(key.column());
+                        vb = b.getValue(key.column());
                     } else {
-                        va = a.evaluateExpression(expr);
-                        vb = b.evaluateExpression(expr);
+                        va = a.evaluateExpression(key.expression());
+                        vb = b.evaluateExpression(key.expression());
                     }
 
                     int cmp = ValueComparer.compare(va, vb);
                     if (cmp != 0) {
-                        return asc ? cmp : -cmp;
+                        return key.asc() ? cmp : -cmp;
                     }
                 } catch (DBException e) {
                     throw new RuntimeException("OrderBy comparison failed: " + e.getMessage(), e);
@@ -115,7 +113,22 @@ public class OrderByOperator implements PhysicalOperator {
         };
     }
 
-    private TabCol resolveColumn(Column col, ArrayList<ColumnMeta> schema) {
+    private List<SortKey> buildSortKeys() throws DBException {
+        ArrayList<ColumnMeta> schema = child.outputSchema();
+        List<SortKey> sortKeys = new ArrayList<>();
+        for (OrderByElement element : orderByElements) {
+            Expression expr = element.getExpression();
+            boolean asc = !element.isAscDescPresent() || element.isAsc();
+            if (expr instanceof Column col) {
+                sortKeys.add(new SortKey(resolveColumn(col, schema), null, asc));
+            } else {
+                sortKeys.add(new SortKey(null, expr, asc));
+            }
+        }
+        return sortKeys;
+    }
+
+    private TabCol resolveColumn(Column col, ArrayList<ColumnMeta> schema) throws DBException {
         String tableName = col.getTableName();
         String columnName = col.getColumnName();
 
@@ -123,11 +136,23 @@ public class OrderByOperator implements PhysicalOperator {
             return new TabCol(tableName, columnName);
         }
 
+        ColumnMeta match = null;
+        int matchedCount = 0;
         for (ColumnMeta colMeta : schema) {
-            if (colMeta.name.equals(columnName)) {
-                return new TabCol(colMeta.tableName, columnName);
+            if (colMeta.name.equalsIgnoreCase(columnName)) {
+                match = colMeta;
+                matchedCount++;
             }
         }
-        return new TabCol(tableName, columnName);
+        if (matchedCount == 0) {
+            throw new DBException(ExceptionTypes.ColumnDoesNotExist(columnName));
+        }
+        if (matchedCount > 1) {
+            throw new DBException(ExceptionTypes.InvalidSQL(columnName, "Ambiguous column reference"));
+        }
+        return new TabCol(match.tableName, match.name);
+    }
+
+    private record SortKey(TabCol column, Expression expression, boolean asc) {
     }
 }

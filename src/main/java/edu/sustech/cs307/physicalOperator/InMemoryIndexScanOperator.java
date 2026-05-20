@@ -23,6 +23,8 @@ public class InMemoryIndexScanOperator implements PhysicalOperator {
         // REVIEW(Task 3.1 Index Support - In-memory B+ Tree Scan): The operator needs table metadata, a RecordFileHandle, and scan bounds
         // before it can turn index RIDs into tuples. Until the planner provides that
         // context, this is a well-formed empty scan instead of an unfinished stub.
+        // TODO(Task 3.1): Remove this legacy operator or wire it to table
+        // metadata/RID lookup if InMemoryOrderedIndex becomes active again.
         return false;
     }
 

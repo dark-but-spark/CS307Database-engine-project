@@ -58,4 +58,10 @@ public class LRUReplacer implements PageReplacer {
     public int size() {
         return LRUList.size() + pinnedFrames.size();
     }
+
+    public void Reset() {
+        pinnedFrames.clear();
+        LRUHash.clear();
+        LRUList.clear();
+    }
 }

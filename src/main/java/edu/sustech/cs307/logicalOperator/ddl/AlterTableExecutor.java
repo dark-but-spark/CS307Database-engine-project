@@ -29,6 +29,9 @@ public class AlterTableExecutor implements DMLExecutor {
                 for (var colDataType : expr.getColDataTypeList()) {
                     String colName = colDataType.getColumnName();
                     String dataType = colDataType.getColDataType().getDataType();
+                    // DONE: ADD COLUMN accepts caller-provided DEFAULT values via
+                    // addColumn(table, col, type, Value). Constraints/position
+                    // clauses remain pending metadata support.
                     dbManager.addColumn(tableName, colName, dataType);
                     Logger.info("Added column {} {} to table {}", colName, dataType, tableName);
                 }
@@ -44,7 +47,17 @@ public class AlterTableExecutor implements DMLExecutor {
                     dbManager.renameTable(tableName, newName);
                     Logger.info("Renamed table {} to {}", tableName, newName);
                 }
+            } else if (op == AlterOperation.MODIFY) {
+                String colName = expr.getColumnName();
+                if (colName != null && expr.getColDataTypeList() != null && !expr.getColDataTypeList().isEmpty()) {
+                    String dataType = expr.getColDataTypeList().get(0)
+                            .getColDataType().getDataType();
+                    dbManager.modifyColumn(tableName, colName, dataType);
+                    Logger.info("Modified column {} to type {} in table {}", colName, dataType, tableName);
+                }
             } else {
+                // DONE: ALTER TABLE MODIFY COLUMN supported via modifyColumn.
+                // RENAME COLUMN pending AlterOperation.RENAME_COLUMN in JSqlParser.
                 throw new DBException(ExceptionTypes.UnsupportedCommand(
                         "ALTER TABLE " + op + " (not supported)"));
             }

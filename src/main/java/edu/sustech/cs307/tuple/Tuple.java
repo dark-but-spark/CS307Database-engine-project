@@ -13,6 +13,11 @@ import edu.sustech.cs307.value.ValueType;
 import net.sf.jsqlparser.expression.*;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
+import net.sf.jsqlparser.expression.operators.arithmetic.Addition;
+import net.sf.jsqlparser.expression.operators.arithmetic.Division;
+import net.sf.jsqlparser.expression.operators.arithmetic.Multiplication;
+import net.sf.jsqlparser.expression.operators.arithmetic.Subtraction;
+import net.sf.jsqlparser.expression.Function;
 import net.sf.jsqlparser.expression.operators.relational.*;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
@@ -56,14 +61,31 @@ public abstract class Tuple {
             return evaluateInExpression(tuple, inExpression);
         } else if (whereExpr instanceof ExistsExpression existsExpression) {
             return evaluateExistsExpression(tuple, existsExpression);
+        } else if (whereExpr instanceof Between between) {
+            return evaluateBetweenExpression(tuple, between);
         } else if (whereExpr instanceof BinaryExpression binaryExpression) {
             return evaluateBinaryExpression(tuple, binaryExpression);
         } else {
-            // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): BETWEEN
-            // and arithmetic expressions still need dedicated semantics before
-            // they can be accepted safely.
+            // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): Arithmetic
+            // expressions still need dedicated semantics before they can be
+            // accepted safely.
+            // DONE(Task 2.1.2): Arithmetic (ADD/SUB/MUL/DIV) and scalar functions
+            // (LOWER/UPPER) via evaluateValue. Falls through here only when
+            // an unrecognized expression is the whole WHERE clause.
             throw new DBException(ExceptionTypes.UnsupportedExpression(whereExpr));
         }
+    }
+
+    private boolean evaluateBetweenExpression(Tuple tuple, Between between) throws DBException {
+        Value value = evaluateValue(tuple, between.getLeftExpression());
+        Value lowValue = evaluateValue(tuple, between.getBetweenExpressionStart());
+        Value highValue = evaluateValue(tuple, between.getBetweenExpressionEnd());
+        if (value == null || lowValue == null || highValue == null) {
+            return false;
+        }
+        boolean matched = ValueComparer.compare(value, lowValue) >= 0
+                && ValueComparer.compare(value, highValue) <= 0;
+        return between.isNot() ? !matched : matched;
     }
 
     private boolean evaluateBinaryExpression(Tuple tuple, BinaryExpression binaryExpr) throws DBException {
@@ -137,6 +159,8 @@ public abstract class Tuple {
     }
 
     private List<Value> executeSubQuery(Tuple tuple, String rawSql) throws DBException {
+        // TODO(Task 2.2): Replace string substitution for correlated subqueries
+        // with a scoped expression evaluator to avoid accidental text rewrites.
         DBManager dbManager = DBManager.getInstance();
         if (dbManager == null) {
             throw new DBException(ExceptionTypes.UnsupportedExpression(new StringValue(rawSql)));
@@ -202,9 +226,26 @@ public abstract class Tuple {
         return regex.toString();
     }
 
+    private enum ArithmeticOp { ADD, SUB, MUL, DIV }
+
     private Value evaluateValue(Tuple tuple, Expression expr) throws DBException {
         if (expr instanceof Column column) {
             return resolveColumnValue(tuple, column);
+        }
+        if (expr instanceof Addition addition) {
+            return evaluateArithmetic(tuple, addition, ArithmeticOp.ADD);
+        }
+        if (expr instanceof Subtraction subtraction) {
+            return evaluateArithmetic(tuple, subtraction, ArithmeticOp.SUB);
+        }
+        if (expr instanceof Multiplication multiplication) {
+            return evaluateArithmetic(tuple, multiplication, ArithmeticOp.MUL);
+        }
+        if (expr instanceof Division division) {
+            return evaluateArithmetic(tuple, division, ArithmeticOp.DIV);
+        }
+        if (expr instanceof Function function) {
+            return evaluateScalarFunction(tuple, function);
         }
         return getConstantValue(expr);
     }
@@ -246,6 +287,53 @@ public abstract class Tuple {
         return null;
     }
 
+    private Value evaluateArithmetic(Tuple tuple, BinaryExpression expr, ArithmeticOp op) throws DBException {
+        Value left = evaluateValue(tuple, expr.getLeftExpression());
+        Value right = evaluateValue(tuple, expr.getRightExpression());
+        if (left == null || right == null) {
+            return null;
+        }
+        if (left.type != ValueType.INTEGER && left.type != ValueType.FLOAT) {
+            throw new DBException(ExceptionTypes.WrongComparisonError(left.type, ValueType.INTEGER));
+        }
+        if (right.type != ValueType.INTEGER && right.type != ValueType.FLOAT) {
+            throw new DBException(ExceptionTypes.WrongComparisonError(right.type, ValueType.INTEGER));
+        }
+        boolean isFloat = left.type == ValueType.FLOAT || right.type == ValueType.FLOAT;
+        double lv = ((Number) left.value).doubleValue();
+        double rv = ((Number) right.value).doubleValue();
+        double result = switch (op) {
+            case ADD -> lv + rv;
+            case SUB -> lv - rv;
+            case MUL -> lv * rv;
+            case DIV -> {
+                if (rv == 0.0) throw new DBException(ExceptionTypes.InvalidSQL(expr.toString(), "Division by zero"));
+                yield lv / rv;
+            }
+        };
+        if (isFloat) {
+            return new Value(result, ValueType.FLOAT);
+        }
+        return new Value((long) result, ValueType.INTEGER);
+    }
+
+    private Value evaluateScalarFunction(Tuple tuple, Function function) throws DBException {
+        String name = function.getName().toLowerCase();
+        if (name.equals("lower") || name.equals("upper")) {
+            if (function.getParameters() == null || function.getParameters().getExpressions() == null
+                    || function.getParameters().getExpressions().size() != 1) {
+                throw new DBException(ExceptionTypes.UnsupportedExpression(function));
+            }
+            Value arg = evaluateValue(tuple, function.getParameters().getExpressions().get(0));
+            if (arg == null || arg.type != ValueType.CHAR) {
+                throw new DBException(ExceptionTypes.WrongComparisonError(arg != null ? arg.type : null, ValueType.CHAR));
+            }
+            String str = arg.value.toString();
+            return new Value(name.equals("lower") ? str.toLowerCase() : str.toUpperCase(), ValueType.CHAR);
+        }
+        throw new DBException(ExceptionTypes.UnsupportedExpression(function));
+    }
+
     public Value evaluateExpression(Expression expr) throws DBException {
         if (expr instanceof StringValue stringValue) {
             return new Value(stringValue.getValue(), ValueType.CHAR);
@@ -255,6 +343,18 @@ public abstract class Tuple {
             return new Value(longValue.getValue(), ValueType.INTEGER);
         } else if (expr instanceof Column column) {
             return resolveColumnValue(this, column);
+        } else if (expr instanceof Addition addition) {
+            return evaluateArithmetic(this, addition, ArithmeticOp.ADD);
+        } else if (expr instanceof Subtraction subtraction) {
+            return evaluateArithmetic(this, subtraction, ArithmeticOp.SUB);
+        } else if (expr instanceof Multiplication multiplication) {
+            return evaluateArithmetic(this, multiplication, ArithmeticOp.MUL);
+        } else if (expr instanceof Division division) {
+            return evaluateArithmetic(this, division, ArithmeticOp.DIV);
+        } else if (expr instanceof Function function) {
+            return evaluateScalarFunction(this, function);
+        } else if (expr instanceof BinaryExpression) {
+            return evaluateValue(this, expr);
         } else {
             throw new DBException(ExceptionTypes.UnsupportedExpression(expr));
         }

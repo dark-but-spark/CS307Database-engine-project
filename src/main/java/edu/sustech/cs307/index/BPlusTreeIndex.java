@@ -108,10 +108,19 @@ public class BPlusTreeIndex implements Index {
         return flatten(keys.subSet(new ValueIndexKey(low), leftEqual, new ValueIndexKey(high), rightEqual));
     }
 
+    public Iterator<Entry<Value, RID>> All() {
+        if (keys.isEmpty()) {
+            return List.<Entry<Value, RID>>of().iterator();
+        }
+        return flatten(keys);
+    }
+
     public String printTree() {
         // REVIEW(Task 3.1 Index Support - Print B+Tree Nodes): the imported tree's
         // toString prints node key layout, but keys are adapter objects. A more
         // report-friendly printer should expose typed Value text per node.
+        // TODO(Task 3.1): Add a typed B+Tree node printer that includes key
+        // values, RID buckets, and tree levels for presentation/debugging.
         return "B+Tree[" + tableName + "." + indexName + " on " + columnName + "]\n" + tree;
     }
 

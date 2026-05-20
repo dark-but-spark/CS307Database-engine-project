@@ -1,11 +1,11 @@
 package edu.sustech.cs307.physicalOperator;
 
 import edu.sustech.cs307.exception.DBException;
+import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.tuple.ProjectTuple;
 import edu.sustech.cs307.tuple.Tuple;
 import edu.sustech.cs307.meta.TabCol;
-import edu.sustech.cs307.value.ValueType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,18 +15,11 @@ public class ProjectOperator implements PhysicalOperator {
     private List<TabCol> outputSchema; // Use bounded wildcard
     private Tuple currentTuple;
 
-    public ProjectOperator(PhysicalOperator child, List<TabCol> outputSchema) { // Use bounded wildcard
+    public ProjectOperator(PhysicalOperator child, List<TabCol> outputSchema) throws DBException { // Use bounded wildcard
         // Task 2.1.2 Logical/Physical Operators - Projection: resolve SELECT *
-        // to the child schema, otherwise keep the requested output columns.
+        // and requested columns to concrete child schema columns.
         this.child = child;
-        this.outputSchema = outputSchema;
-        if (this.outputSchema.size() == 1 && this.outputSchema.get(0).getTableName().equals("*")) {
-            List<TabCol> newOutputSchema = new ArrayList<>();
-            for (ColumnMeta tabCol : child.outputSchema()) {
-                newOutputSchema.add(new TabCol(tabCol.tableName, tabCol.name));
-            }
-            this.outputSchema = newOutputSchema;
-        }
+        this.outputSchema = resolveOutputSchema(outputSchema);
     }
 
     @Override
@@ -72,16 +65,46 @@ public class ProjectOperator implements PhysicalOperator {
         ArrayList<ColumnMeta> projectedSchema = new ArrayList<>();
         for (TabCol outputColumn : outputSchema) {
             for (ColumnMeta columnMeta : childSchema) {
-                boolean tableMatches = outputColumn.getTableName().equals(columnMeta.tableName)
-                        || outputColumn.getTableName().equals(outputColumn.getColumnName());
-                if (tableMatches && outputColumn.getColumnName().equals(columnMeta.name)) {
+                if (outputColumn.getTableName().equals(columnMeta.tableName)
+                        && outputColumn.getColumnName().equals(columnMeta.name)) {
                     projectedSchema.add(columnMeta);
                     break;
                 }
             }
         }
-        // REVIEW(Task 2.1.2 Logical/Physical Operators - Projection): Ambiguous unqualified columns are resolved to the first matching
-        // child column, matching the current ProjectTuple lookup behavior.
         return projectedSchema;
+    }
+
+    private List<TabCol> resolveOutputSchema(List<TabCol> requestedSchema) throws DBException {
+        ArrayList<TabCol> resolved = new ArrayList<>();
+        if (requestedSchema.size() == 1 && requestedSchema.get(0).getTableName().equals("*")) {
+            for (ColumnMeta columnMeta : child.outputSchema()) {
+                resolved.add(new TabCol(columnMeta.tableName, columnMeta.name));
+            }
+            return resolved;
+        }
+
+        for (TabCol requestedColumn : requestedSchema) {
+            ColumnMeta match = null;
+            int matchedCount = 0;
+            for (ColumnMeta columnMeta : child.outputSchema()) {
+                boolean tableMatches = requestedColumn.getTableName() == null
+                        || requestedColumn.getTableName().isBlank()
+                        || requestedColumn.getTableName().equalsIgnoreCase(columnMeta.tableName);
+                if (tableMatches && requestedColumn.getColumnName().equalsIgnoreCase(columnMeta.name)) {
+                    match = columnMeta;
+                    matchedCount++;
+                }
+            }
+            if (matchedCount == 0) {
+                throw new DBException(ExceptionTypes.ColumnDoesNotExist(requestedColumn.getColumnName()));
+            }
+            if (matchedCount > 1) {
+                throw new DBException(ExceptionTypes.InvalidSQL(requestedColumn.getColumnName(),
+                        "Ambiguous column reference"));
+            }
+            resolved.add(new TabCol(match.tableName, match.name));
+        }
+        return resolved;
     }
 }

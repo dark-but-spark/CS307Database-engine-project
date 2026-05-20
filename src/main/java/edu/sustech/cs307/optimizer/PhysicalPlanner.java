@@ -6,6 +6,7 @@ import edu.sustech.cs307.logicalOperator.*;
 import edu.sustech.cs307.physicalOperator.*;
 import edu.sustech.cs307.system.DBManager;
 import edu.sustech.cs307.value.Value;
+import edu.sustech.cs307.value.ValueComparer;
 import edu.sustech.cs307.value.ValueType;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.meta.TableMeta;
@@ -14,8 +15,14 @@ import net.sf.jsqlparser.expression.DoubleValue;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
 import net.sf.jsqlparser.expression.StringValue;
+import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
+import net.sf.jsqlparser.expression.operators.relational.Between;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
+import net.sf.jsqlparser.expression.operators.relational.GreaterThan;
+import net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals;
+import net.sf.jsqlparser.expression.operators.relational.MinorThan;
+import net.sf.jsqlparser.expression.operators.relational.MinorThanEquals;
 import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.select.Values;
@@ -23,7 +30,9 @@ import net.sf.jsqlparser.statement.update.UpdateSet;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class PhysicalPlanner {
     public static PhysicalOperator generateOperator(DBManager dbManager, LogicalOperator logicalOp) throws DBException {
@@ -75,16 +84,14 @@ public class PhysicalPlanner {
 
     private static PhysicalOperator handleFilter(DBManager dbManager, LogicalFilterOperator logicalFilterOp)
             throws DBException {
-        // Task 3.1 Index Support - Indexed Access Path: when the WHERE clause is a
-        // simple column = value equality on an indexed column, lower the predicate
-        // directly into IndexScanOperator and skip SeqScan + FilterOperator.
+        // Task 3.1 Index Support - Indexed Access Path: use B+Tree scans for
+        // equality/range predicates that can be extracted from single-table WHERE.
+        // TODO(Task 3.1): Consider OR predicates, multi-index intersections, and
+        // simple cost estimates instead of choosing the first usable index.
         PhysicalOperator indexScan = tryBuildIndexScan(dbManager, logicalFilterOp);
         if (indexScan != null) {
-            return indexScan;
+            return new FilterOperator(indexScan, logicalFilterOp.getWhereExpr());
         }
-        // REVIEW(Task 3.1 Index Support - Indexed Access Path): Compound WHERE
-        // conditions (AND/OR) and range predicates (>, <, BETWEEN) still fall
-        // through to SeqScanOperator + FilterOperator.
         PhysicalOperator inputOp = generateOperator(dbManager, logicalFilterOp.getChild());
         // Task 2.1.2 Logical/Physical Operators - WHERE: wrap the child operator
         // with runtime predicate filtering.
@@ -92,15 +99,7 @@ public class PhysicalPlanner {
     }
 
     /**
-     * 尝试将等值过滤谓词转换为基于 B+Tree 索引的扫描。
-     *
-     * <p>当前仅处理 {@code WHERE col = literal} 的简单等值条件。
-     * 返回 null 表示无法使用索引，调用者应回退到 SeqScan + FilterOperator。</p>
-     *
-     * <p>REVIEW(Task 3.1 Index Support - Indexed Access Path): Only simple
-     * column = value equality is lowered to index scan. Range predicates
-     * (>, &lt;, BETWEEN) and compound conditions (AND/OR) should be added once
-     * the planner can split AND into individual boundable predicates.</p>
+     * 尝试将过滤谓词转换为基于 B+Tree 索引的扫描。
      *
      * @param dbManager       数据库管理器
      * @param logicalFilterOp 逻辑过滤算子
@@ -112,46 +111,189 @@ public class PhysicalPlanner {
         if (!(child instanceof LogicalTableScanOperator tableScan)) {
             return null;
         }
-        Expression whereExpr = logicalFilterOp.getWhereExpr();
-        if (!(whereExpr instanceof EqualsTo equalsTo)) {
-            return null;
-        }
-
-        // 确定哪边是列引用，哪边是字面值
-        Column column;
-        Expression valueExpr;
-        if (equalsTo.getLeftExpression() instanceof Column col) {
-            column = col;
-            valueExpr = equalsTo.getRightExpression();
-        } else if (equalsTo.getRightExpression() instanceof Column col) {
-            column = col;
-            valueExpr = equalsTo.getLeftExpression();
-        } else {
-            return null;
-        }
-
         String tableName = tableScan.getTableName();
-        String columnName = column.getColumnName();
-
-        // 检查该列是否存在 B+Tree 索引
         TableMeta tableMeta = dbManager.getMetaManager().getTable(tableName);
-        if (tableMeta.findIndexOnColumn(columnName) == null) {
+        List<Expression> conjuncts = new ArrayList<>();
+        collectAndConjuncts(logicalFilterOp.getWhereExpr(), conjuncts);
+        IndexBounds selectedBounds = null;
+        for (Expression conjunct : conjuncts) {
+            IndexPredicate predicate = parseIndexPredicate(tableName, conjunct);
+            if (predicate == null || tableMeta.findIndexOnColumn(predicate.columnName()) == null) {
+                continue;
+            }
+            IndexBounds candidate = new IndexBounds(predicate.columnName());
+            for (Expression expression : conjuncts) {
+                IndexPredicate peer = parseIndexPredicate(tableName, expression);
+                if (peer != null && peer.columnName().equalsIgnoreCase(predicate.columnName())) {
+                    candidate.add(peer);
+                }
+            }
+            selectedBounds = candidate;
+            break;
+        }
+        if (selectedBounds == null) {
             return null;
         }
+        if (selectedBounds.equalValue != null) {
+            return new IndexScanOperator(tableName, dbManager, selectedBounds.columnName, selectedBounds.equalValue);
+        }
+        return new IndexScanOperator(tableName, dbManager, selectedBounds.columnName,
+                selectedBounds.lowValue, selectedBounds.highValue,
+                selectedBounds.lowInclusive, selectedBounds.highInclusive);
+    }
 
-        // 将 JSqlParser 字面值转为内部 Value
-        Value searchValue;
-        if (valueExpr instanceof LongValue longValue) {
-            searchValue = new Value(longValue.getValue());
-        } else if (valueExpr instanceof StringValue stringValue) {
-            searchValue = new Value(stringValue.getValue());
-        } else if (valueExpr instanceof DoubleValue doubleValue) {
-            searchValue = new Value(doubleValue.getValue());
+    private static void collectAndConjuncts(Expression expression, List<Expression> result) {
+        if (expression instanceof AndExpression andExpression) {
+            collectAndConjuncts(andExpression.getLeftExpression(), result);
+            collectAndConjuncts(andExpression.getRightExpression(), result);
         } else {
+            result.add(expression);
+        }
+    }
+
+    private static IndexPredicate parseIndexPredicate(String tableName, Expression expression) {
+        try {
+            if (expression instanceof EqualsTo equalsTo) {
+                return parseComparison(tableName, equalsTo.getLeftExpression(), equalsTo.getRightExpression(), "=");
+            }
+            if (expression instanceof GreaterThan greaterThan) {
+                return parseComparison(tableName, greaterThan.getLeftExpression(), greaterThan.getRightExpression(), ">");
+            }
+            if (expression instanceof GreaterThanEquals greaterThanEquals) {
+                return parseComparison(tableName, greaterThanEquals.getLeftExpression(), greaterThanEquals.getRightExpression(), ">=");
+            }
+            if (expression instanceof MinorThan minorThan) {
+                return parseComparison(tableName, minorThan.getLeftExpression(), minorThan.getRightExpression(), "<");
+            }
+            if (expression instanceof MinorThanEquals minorThanEquals) {
+                return parseComparison(tableName, minorThanEquals.getLeftExpression(), minorThanEquals.getRightExpression(), "<=");
+            }
+            if (expression instanceof Between between && !between.isNot()) {
+                if (!(between.getLeftExpression() instanceof Column column)) {
+                    return null;
+                }
+                String columnName = normalizedColumnName(tableName, column);
+                if (columnName == null) {
+                    return null;
+                }
+                Value low = parseLiteralValue(between.getBetweenExpressionStart());
+                Value high = parseLiteralValue(between.getBetweenExpressionEnd());
+                return low == null || high == null ? null : IndexPredicate.range(columnName, low, true, high, true);
+            }
+        } catch (RuntimeException ignored) {
             return null;
         }
+        return null;
+    }
 
-        return new IndexScanOperator(tableName, dbManager, columnName, searchValue);
+    private static IndexPredicate parseComparison(String tableName, Expression left, Expression right, String operator) {
+        if (left instanceof Column column) {
+            String columnName = normalizedColumnName(tableName, column);
+            Value value = parseLiteralValue(right);
+            return columnName == null || value == null ? null : IndexPredicate.fromOperator(columnName, operator, value);
+        }
+        if (right instanceof Column column) {
+            String columnName = normalizedColumnName(tableName, column);
+            Value value = parseLiteralValue(left);
+            return columnName == null || value == null ? null : IndexPredicate.fromOperator(columnName, flipOperator(operator), value);
+        }
+        return null;
+    }
+
+    private static String normalizedColumnName(String tableName, Column column) {
+        String qualifier = column.getTableName();
+        if (qualifier != null && !qualifier.isBlank() && !qualifier.equalsIgnoreCase(tableName)) {
+            return null;
+        }
+        return column.getColumnName();
+    }
+
+    private static String flipOperator(String operator) {
+        return switch (operator) {
+            case ">" -> "<";
+            case ">=" -> "<=";
+            case "<" -> ">";
+            case "<=" -> ">=";
+            default -> operator;
+        };
+    }
+
+    private static Value parseLiteralValue(Expression valueExpr) {
+        if (valueExpr instanceof LongValue longValue) {
+            return new Value(longValue.getValue());
+        } else if (valueExpr instanceof StringValue stringValue) {
+            return new Value(stringValue.getValue());
+        } else if (valueExpr instanceof DoubleValue doubleValue) {
+            return new Value(doubleValue.getValue());
+        }
+        return null;
+    }
+
+    private record IndexPredicate(String columnName, Value equalValue,
+                                  Value lowValue, boolean lowInclusive,
+                                  Value highValue, boolean highInclusive) {
+        static IndexPredicate equal(String columnName, Value value) {
+            return new IndexPredicate(columnName, value, null, false, null, false);
+        }
+
+        static IndexPredicate range(String columnName, Value lowValue, boolean lowInclusive,
+                                    Value highValue, boolean highInclusive) {
+            return new IndexPredicate(columnName, null, lowValue, lowInclusive, highValue, highInclusive);
+        }
+
+        static IndexPredicate fromOperator(String columnName, String operator, Value value) {
+            return switch (operator) {
+                case "=" -> equal(columnName, value);
+                case ">" -> range(columnName, value, false, null, false);
+                case ">=" -> range(columnName, value, true, null, false);
+                case "<" -> range(columnName, null, false, value, false);
+                case "<=" -> range(columnName, null, false, value, true);
+                default -> null;
+            };
+        }
+    }
+
+    private static class IndexBounds {
+        private final String columnName;
+        private Value equalValue;
+        private Value lowValue;
+        private Value highValue;
+        private boolean lowInclusive;
+        private boolean highInclusive;
+
+        private IndexBounds(String columnName) {
+            this.columnName = columnName;
+        }
+
+        private void add(IndexPredicate predicate) throws DBException {
+            if (predicate.equalValue() != null) {
+                this.equalValue = predicate.equalValue();
+            }
+            if (predicate.lowValue() != null && isTighterLow(predicate)) {
+                this.lowValue = predicate.lowValue();
+                this.lowInclusive = predicate.lowInclusive();
+            }
+            if (predicate.highValue() != null && isTighterHigh(predicate)) {
+                this.highValue = predicate.highValue();
+                this.highInclusive = predicate.highInclusive();
+            }
+        }
+
+        private boolean isTighterLow(IndexPredicate predicate) throws DBException {
+            if (lowValue == null) {
+                return true;
+            }
+            int comparison = ValueComparer.compare(predicate.lowValue(), lowValue);
+            return comparison > 0 || (comparison == 0 && lowInclusive && !predicate.lowInclusive());
+        }
+
+        private boolean isTighterHigh(IndexPredicate predicate) throws DBException {
+            if (highValue == null) {
+                return true;
+            }
+            int comparison = ValueComparer.compare(predicate.highValue(), highValue);
+            return comparison < 0 || (comparison == 0 && highInclusive && !predicate.highInclusive());
+        }
     }
 
     private static PhysicalOperator handleJoin(DBManager dbManager, LogicalJoinOperator logicalJoinOp)
@@ -189,94 +331,106 @@ public class PhysicalPlanner {
     private static PhysicalOperator handleInsert(DBManager dbManager, LogicalInsertOperator logicalInsertOp)
             throws DBException {
         var tableMeta = dbManager.getMetaManager().getTable(logicalInsertOp.tableName);
-        // Process columns
-        List<String> columns = new ArrayList<>();
+        List<String> targetColumns = new ArrayList<>();
         if (logicalInsertOp.columns != null) {
-            // the length must equal to the number of columns in the table
-            if (tableMeta.columns.size() != logicalInsertOp.columns.size()) {
-                throw new DBException(ExceptionTypes.InsertColumnSizeMismatch());
-            }
-            for (int i = 0; i < logicalInsertOp.columns.size(); i++) {
-                String colName = logicalInsertOp.columns.get(i).getColumnName();
+            for (Column column : logicalInsertOp.columns) {
+                String colName = column.getColumnName();
                 if (tableMeta.getColumnMeta(colName) == null) {
                     throw new DBException(ExceptionTypes.ColumnDoesNotExist(colName));
                 }
-                if (!tableMeta.columns_list.get(i).name.equals(colName)) {
+                if (targetColumns.stream().anyMatch(existing -> existing.equalsIgnoreCase(colName))) {
                     throw new DBException(ExceptionTypes.InsertColumnNameMismatch());
                 }
-                columns.add(colName);
+                targetColumns.add(colName);
             }
 
         } else {
-            // If no columns specified, use all table columns in order
             for (ColumnMeta columnMeta : tableMeta.columns_list) {
-                columns.add(columnMeta.name);
+                targetColumns.add(columnMeta.name);
             }
         }
         if (!(logicalInsertOp.values instanceof Values)) {
             throw new DBException(ExceptionTypes.InvalidSQL("INSERT", "Values must be an expression list"));
         }
         ExpressionList<?> valuesList = ((Values) logicalInsertOp.values).getExpressions();
-        if (columns.size() != valuesList.size()) {
-            var element = valuesList.get(0);
-            if (element instanceof ParenthesedExpressionList<?> parenthesed) {
-                // check the children reexpressions
-                for (Expression expr : valuesList) {
-                    if (expr instanceof ParenthesedExpressionList<?> expressionList) {
-                        if (expressionList.getExpressions().size() != columns.size()) {
-                            throw new DBException(ExceptionTypes.InsertColumnSizeMismatch());
-                        }
-                    } else {
-                        throw new DBException(ExceptionTypes.InsertColumnSizeMismatch());
-                    }
-                }
-            } else {
-                throw new DBException(ExceptionTypes.InsertColumnSizeMismatch());
-            }
-        }
-
-        List<Value> values = new ArrayList<>();
-        parseValue(values, valuesList, tableMeta);
-        // will always be same size tuple
-
-        // check the
+        List<List<Expression>> rows = parseInsertRows(valuesList, targetColumns.size());
+        List<String> storageColumns = tableMeta.columns_list.stream().map(column -> column.name).toList();
+        List<Value> values = buildStorageOrderedRows(rows, targetColumns, tableMeta);
 
         // Task 2.0.2 Data Operations - INSERT: validated VALUES are passed to the
         // physical insert operator for record serialization and storage.
-        return new InsertOperator(logicalInsertOp.tableName, columns,
+        return new InsertOperator(logicalInsertOp.tableName, storageColumns,
                 values, dbManager);
     }
 
     @SuppressWarnings("deprecation")
-    private static void parseValue(List<Value> values, ExpressionList<?> valuesList, TableMeta tableMeta)
+    private static List<List<Expression>> parseInsertRows(ExpressionList<?> valuesList, int columnCount)
             throws DBException {
-        for (int i = 0; i < valuesList.size(); i++) {
-            var expr = valuesList.getExpressions().get(i);
-            if (expr instanceof StringValue string_value) {
-                if (tableMeta.columns_list.get(i).type != ValueType.CHAR) {
-                    throw new DBException(ExceptionTypes.InsertColumnTypeMismatch());
-                }
-                String value_str = string_value.getValue();
-                if (value_str.length() > 64) {
-                    value_str = value_str.substring(0, 64);
-                }
-                values.add(new Value(value_str));
-            } else if (expr instanceof DoubleValue float_value) {
-                if (tableMeta.columns_list.get(i).type != ValueType.FLOAT) {
-                    throw new DBException(ExceptionTypes.InsertColumnTypeMismatch());
-                }
-                values.add(new Value(float_value.getValue()));
-            } else if (expr instanceof LongValue long_value) {
-                if (tableMeta.columns_list.get(i).type != ValueType.INTEGER) {
-                    throw new DBException(ExceptionTypes.InsertColumnTypeMismatch());
-                }
-                values.add(new Value(long_value.getValue()));
-            } else if (expr instanceof ParenthesedExpressionList<?> expressionList) {
-                parseValue(values, expressionList, tableMeta);
-            } else {
-                throw new DBException(ExceptionTypes.InvalidSQL("INSERT", "Unsupported value type in VALUES clause"));
+        List<List<Expression>> rows = new ArrayList<>();
+        if (valuesList.size() == columnCount
+                && valuesList.getExpressions().stream().noneMatch(ParenthesedExpressionList.class::isInstance)) {
+            rows.add(new ArrayList<>(valuesList.getExpressions()));
+            return rows;
+        }
+        for (Expression expr : valuesList.getExpressions()) {
+            if (!(expr instanceof ParenthesedExpressionList<?> rowExpr)) {
+                throw new DBException(ExceptionTypes.InsertColumnSizeMismatch());
+            }
+            if (rowExpr.getExpressions().size() != columnCount) {
+                throw new DBException(ExceptionTypes.InsertColumnSizeMismatch());
+            }
+            rows.add(new ArrayList<>(rowExpr.getExpressions()));
+        }
+        return rows;
+    }
+
+    private static List<Value> buildStorageOrderedRows(List<List<Expression>> rows, List<String> targetColumns,
+                                                       TableMeta tableMeta) throws DBException {
+        List<Value> values = new ArrayList<>();
+        for (List<Expression> row : rows) {
+            Map<String, Value> rowValues = new HashMap<>();
+            for (ColumnMeta columnMeta : tableMeta.columns_list) {
+                rowValues.put(columnMeta.name, defaultInsertValue(columnMeta.type));
+            }
+            for (int i = 0; i < targetColumns.size(); i++) {
+                ColumnMeta columnMeta = tableMeta.getColumnMeta(targetColumns.get(i));
+                rowValues.put(columnMeta.name, parseInsertValue(row.get(i), columnMeta));
+            }
+            for (ColumnMeta columnMeta : tableMeta.columns_list) {
+                values.add(rowValues.get(columnMeta.name));
             }
         }
+        return values;
+    }
+
+    private static Value parseInsertValue(Expression expr, ColumnMeta columnMeta) throws DBException {
+        if (expr instanceof StringValue stringValue) {
+            if (columnMeta.type != ValueType.CHAR) {
+                throw new DBException(ExceptionTypes.InsertColumnTypeMismatch());
+            }
+            String value = stringValue.getValue();
+            return new Value(value.length() > Value.CHAR_SIZE ? value.substring(0, Value.CHAR_SIZE) : value);
+        } else if (expr instanceof DoubleValue doubleValue) {
+            if (columnMeta.type != ValueType.FLOAT) {
+                throw new DBException(ExceptionTypes.InsertColumnTypeMismatch());
+            }
+            return new Value(doubleValue.getValue());
+        } else if (expr instanceof LongValue longValue) {
+            if (columnMeta.type != ValueType.INTEGER) {
+                throw new DBException(ExceptionTypes.InsertColumnTypeMismatch());
+            }
+            return new Value(longValue.getValue());
+        }
+        throw new DBException(ExceptionTypes.InvalidSQL("INSERT", "Unsupported value type in VALUES clause"));
+    }
+
+    private static Value defaultInsertValue(ValueType valueType) throws DBException {
+        return switch (valueType) {
+            case CHAR -> new Value("");
+            case INTEGER -> new Value(0L);
+            case FLOAT -> new Value(0.0);
+            default -> throw new DBException(ExceptionTypes.UnsupportedValueType(valueType));
+        };
     }
 
 
@@ -294,10 +448,7 @@ public class PhysicalPlanner {
     private static PhysicalOperator handleDelete(DBManager dbManager, LogicalDeleteOperator logicalDeleteOp) throws DBException {
         PhysicalOperator scanner = generateOperator(dbManager, logicalDeleteOp.getChild());
         // Task 2.1.2 Logical/Physical Operators - DELETE: execute row-level
-        // deletion through a sequential scan and WHERE predicate evaluation.
-        // REVIEW(Task 2.1.2 Logical/Physical Operators - DELETE): DeleteOperator
-        // currently requires a SeqScanOperator child; this should be revisited if
-        // DELETE starts using index access paths.
+        // deletion through the planned scan and WHERE predicate evaluation.
         return new DeleteOperator(scanner, dbManager, logicalDeleteOp.getTableName(), logicalDeleteOp.getWhereExpr());
     }
 

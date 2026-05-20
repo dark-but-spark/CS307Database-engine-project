@@ -38,6 +38,8 @@ public class TransactionManager {
         // REVIEW(Task 4.2 Transaction Q&A - Snapshot/rollback Design): This transaction manager uses directory snapshots instead of
         // write-ahead logging, so it is suitable for this teaching engine but not
         // for concurrent or large databases.
+        // TODO(Task 4.2): Replace directory snapshots with undo/redo logging if
+        // the engine needs large databases, crash recovery, or concurrency.
     }
 
 

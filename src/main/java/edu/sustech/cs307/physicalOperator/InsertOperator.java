@@ -42,8 +42,8 @@ public class InsertOperator implements PhysicalOperator {
     public void Begin() throws DBException {
         // Task 2.0.2 Data Operations - INSERT: serialize values into record-sized buffers
         // and append them through RecordFileHandle.
+        var fileHandle = dbManager.getRecordManager().OpenFile(data_file);
         try {
-            var fileHandle = dbManager.getRecordManager().OpenFile(data_file);
             var tableMeta = dbManager.getMetaManager().getTable(data_file);
             List<ColumnMeta> insertColumns = new ArrayList<>();
             for (String columnName : columnNames) {
@@ -63,9 +63,8 @@ public class InsertOperator implements PhysicalOperator {
                 }
             }
             this.rowCount = values.size() / columnSize;
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Failed to insert record: " + e.getMessage() + "\n");
+        } finally {
+            dbManager.getRecordManager().CloseFile(fileHandle);
         }
     }
 

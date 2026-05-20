@@ -61,6 +61,8 @@ public class GroupByOperator implements PhysicalOperator {
 
     @SuppressWarnings("deprecation")
     private void parseAggregate() {
+        // TODO(Task 2.2): Support multiple aggregate expressions, HAVING, and
+        // non-aggregate projected columns according to SQL GROUP BY rules.
         for (SelectItem<?> item : selectItems) {
             if (item.getExpression() instanceof Function f) {
                 String name = f.getName().toLowerCase();
@@ -100,6 +102,8 @@ public class GroupByOperator implements PhysicalOperator {
         child.Begin();
 
         // groupKey(pipe-separated) → list of tuples
+        // TODO(Task 2.2): Use a typed composite group key and streaming/hash
+        // aggregation to avoid materializing every tuple per group.
         Map<String, List<Tuple>> groups = new LinkedHashMap<>();
         Map<String, List<Value>> groupKeyValueMap = new LinkedHashMap<>();
 

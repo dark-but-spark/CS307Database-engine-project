@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.function.IntFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class WhereAndCountSupportTest {
     @TempDir
@@ -59,6 +60,34 @@ class WhereAndCountSupportTest {
                 .isEqualTo(2L);
         assertThat(singleLong(dbManager, "SELECT COUNT(name) FROM users WHERE name LIKE '%o%'"))
                 .isEqualTo(2L);
+    }
+
+    @Test
+    void projectionResolvesUnqualifiedAndQualifiedColumns() throws DBException {
+        DBManager dbManager = buildDbManager();
+        seedUsers(dbManager);
+
+        assertThat(executeStatement(dbManager, "SELECT id, name FROM users"))
+                .extracting(row -> List.of(row[0], row[1]))
+                .containsExactly(
+                        List.of(1L, "alice"),
+                        List.of(2L, "bob"),
+                        List.of(3L, "carol"));
+
+        assertThat(executeStatement(dbManager, "SELECT users.id FROM users"))
+                .extracting(row -> row[0])
+                .containsExactly(1L, 2L, 3L);
+    }
+
+    @Test
+    void projectionRejectsAmbiguousUnqualifiedColumn() throws DBException {
+        DBManager dbManager = buildDbManager();
+        executeStatement(dbManager, "CREATE TABLE left_t (id int, name char)");
+        executeStatement(dbManager, "CREATE TABLE right_t (id int, score int)");
+
+        assertThatThrownBy(() -> executeStatement(dbManager, "SELECT id FROM left_t JOIN right_t"))
+                .isInstanceOf(DBException.class)
+                .hasMessageContaining("Ambiguous column reference");
     }
 
     private void seedUsers(DBManager dbManager) throws DBException {

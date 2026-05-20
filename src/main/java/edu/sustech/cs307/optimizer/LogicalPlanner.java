@@ -37,6 +37,8 @@ public class LogicalPlanner {
     // REVIEW(Task 5.1 Complete Command Interface, Task 4.1 Transaction API): Replace
     // ad-hoc transaction regex parsing with a command parser path that can share
     // statement splitting, semicolon handling, and error reporting with SQL input.
+    // TODO(Task 4.1/5.1): Move transaction commands into a parsed command model
+    // instead of maintaining separate regex handling here.
     private static final Pattern BEGIN_PATTERN = Pattern.compile("(?i)^BEGIN(?:\\s+(?:WORK|TRANSACTION))?$");
     private static final Pattern START_TRANSACTION_PATTERN = Pattern.compile("(?i)^START\\s+TRANSACTION$");
     private static final Pattern ROLLBACK_PATTERN = Pattern.compile("(?i)^ROLLBACK(?:\\s+(?:WORK|TRANSACTION))?$");
@@ -89,12 +91,16 @@ public class LogicalPlanner {
         } else if (stmt instanceof CreateTable createTableStmt) {
             // REVIEW(Task 2.1.1 Basic DDL - CREATE TABLE): CREATE TABLE is executed
             // directly during logical planning instead of returning a logical DDL node.
+            // TODO(Task 2.1.1): Introduce logical/physical DDL operators so DDL
+            // commands share execution, result output, and test paths with DQL.
             new CreateTableExecutor(createTableStmt, dbManager, sql).execute();
             return null;
         } else if (stmt instanceof ExplainStatement explainStatement) {
             // REVIEW(Task 2.1.1 Basic DDL - EXPLAIN): EXPLAIN is handled as an
             // immediate side-effect command, so it cannot be composed or tested as
             // a result-producing operator yet.
+            // TODO(Task 2.1.1): Return EXPLAIN output as a result tuple instead
+            // of logging directly from the executor.
             new ExplainExecutor(explainStatement, dbManager).execute();
             return null;
         } else if (stmt instanceof DescribeStatement describeStatement) {
@@ -103,6 +109,8 @@ public class LogicalPlanner {
         } else if (stmt instanceof ShowStatement showStatement) {
             // REVIEW(Task 2.1.1 Basic DDL - SHOW TABLES): SHOW is parsed separately
             // from normal operator planning and writes output through the executor.
+            // TODO(Task 2.1.1): Model SHOW/DESCRIBE as result-producing commands
+            // so CLI formatting and tests do not depend on Logger output.
             new ShowDatabaseExecutor(showStatement).execute();
             return null;
         }
@@ -123,6 +131,8 @@ public class LogicalPlanner {
             for (Join join : plainSelect.getJoins()) {
                 // REVIEW(Task 2.2 Advanced - Join Operators and Advanced SeqScan): Joins are planned as
                 // nested logical joins without optimizer-based join-order selection.
+                // TODO(Task 2.2): Add join-order selection and join algorithm
+                // choice once table cardinality/statistics are available.
                 root = new LogicalJoinOperator(
                         root,
                         new LogicalTableScanOperator(join.getRightItem().toString(), dbManager),
@@ -169,6 +179,8 @@ public class LogicalPlanner {
             // REVIEW(Task 2.1.3 Sequential Scan Implementation - COUNT): COUNT
             // DISTINCT is intentionally rejected until duplicate elimination is
             // implemented for aggregate inputs.
+            // TODO(Task 2.1.3/2.2): Implement duplicate elimination for
+            // COUNT(DISTINCT column) and grouped distinct aggregates.
             throw new DBException(ExceptionTypes.UnsupportedExpression(function));
         }
         if (function.isAllColumns()) {

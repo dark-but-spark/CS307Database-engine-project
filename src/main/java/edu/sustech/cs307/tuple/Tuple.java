@@ -9,7 +9,12 @@ import edu.sustech.cs307.value.ValueType;
 import net.sf.jsqlparser.expression.*;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
+import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
+import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
+import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
 import net.sf.jsqlparser.schema.Column;
+
+import java.util.regex.Pattern;
 
 public abstract class Tuple {
     public abstract Value getValue(TabCol tabCol) throws DBException;
@@ -30,12 +35,26 @@ public abstract class Tuple {
         } else if (whereExpr instanceof OrExpression orExpr) {
             return evaluateCondition(tuple, orExpr.getLeftExpression())
                     || evaluateCondition(tuple, orExpr.getRightExpression());
+        } else if (whereExpr instanceof Parenthesis parenthesis) {
+            return evaluateCondition(tuple, parenthesis.getExpression());
+        } else if (whereExpr instanceof ParenthesedExpressionList<?> parenthesed
+                && parenthesed.getExpressions().size() == 1) {
+            return evaluateCondition(tuple, parenthesed.getExpressions().get(0));
+        } else if (whereExpr instanceof NotExpression notExpression) {
+            return !evaluateCondition(tuple, notExpression.getExpression());
+        } else if (whereExpr instanceof IsNullExpression isNullExpression) {
+            Value value = evaluateValue(tuple, isNullExpression.getLeftExpression());
+            boolean isNull = value == null || value.value == null;
+            return isNullExpression.isNot() ? !isNull : isNull;
+        } else if (whereExpr instanceof LikeExpression likeExpression) {
+            return evaluateLikeExpression(tuple, likeExpression);
         } else if (whereExpr instanceof BinaryExpression binaryExpression) {
             return evaluateBinaryExpression(tuple, binaryExpression);
         } else {
-            // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): Non-binary predicates such as IS NULL and LIKE are accepted
-            // until their expression-specific semantics are implemented.
-            return true; // For non-binary and non-AND expressions, just return true for now
+            // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): IN, EXISTS,
+            // BETWEEN, and arithmetic expressions still need dedicated
+            // semantics before they can be accepted safely.
+            throw new DBException(ExceptionTypes.UnsupportedExpression(whereExpr));
         }
     }
 
@@ -43,44 +62,8 @@ public abstract class Tuple {
         Expression leftExpr = binaryExpr.getLeftExpression();
         Expression rightExpr = binaryExpr.getRightExpression();
         String operator = binaryExpr.getStringExpression();
-        Value leftValue = null;
-        Value rightValue = null;
-
-
-        if (leftExpr instanceof Column leftColumn) {
-            //get table name
-            String table_name = leftColumn.getTableName();
-            // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): Only fill the table name from TableTuple
-            // when SQL omits it; otherwise qualified predicates may be rewritten
-            // to the current table and hide invalid table references.
-            if (tuple instanceof TableTuple) {
-                TableTuple tableTuple = (TableTuple) tuple;
-                table_name = tableTuple.getTableName();
-            }
-            leftValue = tuple.getValue(new TabCol(table_name, leftColumn.getColumnName()));
-            // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): Guard leftValue before reading type and avoid
-            // Value.toString() for CHAR until Value CHAR decoding is fixed.
-            if (leftValue.type == ValueType.CHAR) {
-                leftValue = new Value(leftValue.toString());
-            }
-        } else {
-            leftValue = getConstantValue(leftExpr); // Handle constant left value
-        }
-
-        if (rightExpr instanceof Column rightColumn) {
-            //get table name
-            String table_name = rightColumn.getTableName();
-            // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): Same qualified-column handling concern as
-            // the left side; TableTuple should not overwrite explicit aliases.
-            if (tuple instanceof TableTuple) {
-                TableTuple tableTuple = (TableTuple) tuple;
-                table_name = tableTuple.getTableName();
-            }
-            rightValue = tuple.getValue(new TabCol(table_name, rightColumn.getColumnName()));
-        } else {
-            rightValue = getConstantValue(rightExpr); // Handle constant right value
-
-        }
+        Value leftValue = evaluateValue(tuple, leftExpr);
+        Value rightValue = evaluateValue(tuple, rightExpr);
 
         if (leftValue == null || rightValue == null)
             return false;
@@ -97,6 +80,70 @@ public abstract class Tuple {
         };
     }
 
+    private boolean evaluateLikeExpression(Tuple tuple, LikeExpression likeExpression) throws DBException {
+        Value leftValue = evaluateValue(tuple, likeExpression.getLeftExpression());
+        Value rightValue = evaluateValue(tuple, likeExpression.getRightExpression());
+        if (leftValue == null || rightValue == null) {
+            return false;
+        }
+        if (leftValue.type != ValueType.CHAR || rightValue.type != ValueType.CHAR) {
+            throw new DBException(ExceptionTypes.WrongComparisonError(leftValue.type, rightValue.type));
+        }
+
+        String value = leftValue.toString();
+        String pattern = rightValue.toString();
+        Pattern regex = Pattern.compile(likePatternToRegex(pattern),
+                likeExpression.isCaseInsensitive() ? Pattern.CASE_INSENSITIVE : 0);
+        boolean matched = regex.matcher(value).matches();
+        return likeExpression.isNot() ? !matched : matched;
+    }
+
+    private String likePatternToRegex(String pattern) {
+        StringBuilder regex = new StringBuilder();
+        for (int i = 0; i < pattern.length(); i++) {
+            char ch = pattern.charAt(i);
+            if (ch == '%') {
+                regex.append(".*");
+            } else if (ch == '_') {
+                regex.append('.');
+            } else {
+                regex.append(Pattern.quote(String.valueOf(ch)));
+            }
+        }
+        return regex.toString();
+    }
+
+    private Value evaluateValue(Tuple tuple, Expression expr) throws DBException {
+        if (expr instanceof Column column) {
+            return resolveColumnValue(tuple, column);
+        }
+        return getConstantValue(expr);
+    }
+
+    private Value resolveColumnValue(Tuple tuple, Column column) throws DBException {
+        String tableName = column.getTableName();
+        String columnName = column.getColumnName();
+        if (tableName != null && !tableName.isBlank()) {
+            return tuple.getValue(new TabCol(tableName, columnName));
+        }
+
+        Value matchedValue = null;
+        int matchedCount = 0;
+        for (TabCol tabCol : tuple.getTupleSchema()) {
+            if (tabCol.getColumnName().equalsIgnoreCase(columnName)) {
+                matchedValue = tuple.getValue(tabCol);
+                matchedCount++;
+            }
+        }
+        if (matchedCount > 1) {
+            // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): Ambiguous
+            // unqualified columns should eventually surface a dedicated
+            // ambiguity error type instead of a generic invalid SQL error.
+            throw new DBException(ExceptionTypes.InvalidSQL(column.toString(), "Ambiguous column reference"));
+        }
+        return matchedValue;
+    }
+
     private Value getConstantValue(Expression expr) {
         if (expr instanceof StringValue) {
             return new Value(((StringValue) expr).getValue(), ValueType.CHAR);
@@ -104,6 +151,8 @@ public abstract class Tuple {
             return new Value(((DoubleValue) expr).getValue(), ValueType.FLOAT);
         } else if (expr instanceof LongValue) {
             return new Value(((LongValue) expr).getValue(), ValueType.INTEGER);
+        } else if (expr instanceof NullValue) {
+            return null;
         }
         return null; // Unsupported constant type
     }
@@ -117,7 +166,7 @@ public abstract class Tuple {
             return new Value(((LongValue) expr).getValue(), ValueType.INTEGER);
         } else if (expr instanceof Column) {
             Column col = (Column) expr;
-            return getValue(new TabCol(col.getTableName(), col.getColumnName()));
+            return resolveColumnValue(this, col);
         } else {
             throw new DBException(ExceptionTypes.UnsupportedExpression(expr));
         }

@@ -5,6 +5,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import net.sf.jsqlparser.JSQLParserException;
+import net.sf.jsqlparser.expression.Function;
+import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.parser.CCJSqlParserManager;
 import net.sf.jsqlparser.parser.JSqlParser;
 import net.sf.jsqlparser.statement.Commit;
@@ -15,6 +17,7 @@ import net.sf.jsqlparser.statement.alter.Alter;
 import net.sf.jsqlparser.statement.delete.Delete;
 import net.sf.jsqlparser.statement.drop.Drop;
 import net.sf.jsqlparser.statement.select.*;
+import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.create.index.CreateIndex;
@@ -146,10 +149,47 @@ public class LogicalPlanner {
             // expressions to the logical filter node for later tuple evaluation.
             root = new LogicalFilterOperator(root, plainSelect.getWhere());
         }
+        LogicalCountOperator countOperator = tryBuildCountOperator(root, plainSelect);
+        if (countOperator != null) {
+            return countOperator;
+        }
         // Task 2.1.2 Logical/Physical Operators - Projection: preserve SELECT
         // items in a logical project node instead of always returning SELECT *.
         root = new LogicalProjectOperator(root, plainSelect.getSelectItems());
         return root;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static LogicalCountOperator tryBuildCountOperator(LogicalOperator child, PlainSelect plainSelect) throws DBException {
+        if (plainSelect.getSelectItems() == null || plainSelect.getSelectItems().size() != 1) {
+            return null;
+        }
+        var selectItem = plainSelect.getSelectItems().get(0);
+        if (!(selectItem.getExpression() instanceof Function function)
+                || !function.getName().equalsIgnoreCase("count")) {
+            return null;
+        }
+
+        if (function.isDistinct() || function.isUnique()) {
+            // REVIEW(Task 2.1.3 Sequential Scan Implementation - COUNT): COUNT
+            // DISTINCT is intentionally rejected until duplicate elimination is
+            // implemented for aggregate inputs.
+            throw new DBException(ExceptionTypes.UnsupportedExpression(function));
+        }
+        if (function.isAllColumns()) {
+            return new LogicalCountOperator(child, true, null, null);
+        }
+        var parameters = function.getParameters();
+        if (parameters == null || parameters.getExpressions() == null || parameters.getExpressions().isEmpty()) {
+            return new LogicalCountOperator(child, true, null, null);
+        }
+        if (parameters.getExpressions().size() == 1 && parameters.getExpressions().get(0) instanceof AllColumns) {
+            return new LogicalCountOperator(child, true, null, null);
+        }
+        if (parameters.getExpressions().size() != 1 || !(parameters.getExpressions().get(0) instanceof Column column)) {
+            throw new DBException(ExceptionTypes.UnsupportedExpression(function));
+        }
+        return new LogicalCountOperator(child, false, column.getColumnName(), column.getTableName());
     }
 
     private static LogicalOperator handleInsert(DBManager dbManager, Insert insertStmt) {

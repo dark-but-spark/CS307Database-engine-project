@@ -41,6 +41,8 @@ public class PhysicalPlanner {
             return handleUpdate(dbManager, updateOperator);
         } else if (logicalOp instanceof LogicalDeleteOperator deleteOperator) {
             return handleDelete(dbManager, deleteOperator);
+        } else if (logicalOp instanceof LogicalCountOperator countOperator) {
+            return handleCount(dbManager, countOperator);
         }
 
         else {
@@ -219,6 +221,14 @@ public class PhysicalPlanner {
         // currently requires a SeqScanOperator child; this should be revisited if
         // DELETE starts using index access paths.
         return new DeleteOperator(scanner, dbManager, logicalDeleteOp.getTableName(), logicalDeleteOp.getWhereExpr());
+    }
+
+    private static PhysicalOperator handleCount(DBManager dbManager, LogicalCountOperator logicalCountOp) throws DBException {
+        PhysicalOperator child = generateOperator(dbManager, logicalCountOp.getChild());
+        // Task 2.1.3 Sequential Scan Implementation - COUNT: count rows from the
+        // planned child pipeline, including any WHERE filters already attached.
+        return new CountOperator(child, logicalCountOp.isStar(), logicalCountOp.getColumnName(),
+                logicalCountOp.getTableName());
     }
 
     private static UpdateSet mergeUpdateSets(List<UpdateSet> updateSets) {

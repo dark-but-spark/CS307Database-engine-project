@@ -1,6 +1,7 @@
 package edu.sustech.cs307.physicalOperator;
 
 import edu.sustech.cs307.exception.DBException;
+import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.meta.TabCol;
 import edu.sustech.cs307.tuple.TempTuple;
@@ -35,6 +36,8 @@ public class CountOperator implements PhysicalOperator {
 
     @Override
     public void Begin() throws DBException {
+        count = 0;
+        isDone = false;
         child.Begin();
         while (child.hasNext()) {
             child.Next();
@@ -45,7 +48,7 @@ public class CountOperator implements PhysicalOperator {
             if (isStar) {
                 count++;
             } else {
-                Value colValue = tuple.getValue(new TabCol(tableName, columnName));
+                Value colValue = getColumnValue(tuple);
                 if (colValue != null) {
                     count++;
                 }
@@ -78,5 +81,28 @@ public class CountOperator implements PhysicalOperator {
         ArrayList<ColumnMeta> schema = new ArrayList<>();
         schema.add(new ColumnMeta("", "count", ValueType.INTEGER, 0, 0));
         return schema;
+    }
+
+    private Value getColumnValue(Tuple tuple) throws DBException {
+        if (tableName != null && !tableName.isBlank()) {
+            return tuple.getValue(new TabCol(tableName, columnName));
+        }
+
+        Value matchedValue = null;
+        int matchedCount = 0;
+        for (TabCol tabCol : tuple.getTupleSchema()) {
+            if (tabCol.getColumnName().equalsIgnoreCase(columnName)) {
+                matchedValue = tuple.getValue(tabCol);
+                matchedCount++;
+            }
+        }
+        if (matchedCount > 1) {
+            // REVIEW(Task 2.1.3 Sequential Scan Implementation - COUNT):
+            // Ambiguous unqualified COUNT(column) should use a dedicated
+            // ambiguity exception once the exception hierarchy grows one.
+            throw new DBException(ExceptionTypes.InvalidSQL("COUNT(" + columnName + ")",
+                    "Ambiguous column reference"));
+        }
+        return matchedValue;
     }
 }

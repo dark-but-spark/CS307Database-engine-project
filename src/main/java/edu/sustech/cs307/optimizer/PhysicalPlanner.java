@@ -43,6 +43,12 @@ public class PhysicalPlanner {
             return handleDelete(dbManager, deleteOperator);
         } else if (logicalOp instanceof LogicalCountOperator countOperator) {
             return handleCount(dbManager, countOperator);
+        } else if (logicalOp instanceof LogicalOrderByOperator orderByOperator) {
+            return handleOrderBy(dbManager, orderByOperator);
+        } else if (logicalOp instanceof LogicalMaxMinOperator maxMinOperator) {
+            return handleMaxMin(dbManager, maxMinOperator);
+        } else if (logicalOp instanceof LogicalGroupByOperator groupByOperator) {
+            return handleGroupBy(dbManager, groupByOperator);
         }
 
         else {
@@ -229,6 +235,26 @@ public class PhysicalPlanner {
         // planned child pipeline, including any WHERE filters already attached.
         return new CountOperator(child, logicalCountOp.isStar(), logicalCountOp.getColumnName(),
                 logicalCountOp.getTableName());
+    }
+
+    private static PhysicalOperator handleOrderBy(DBManager dbManager, LogicalOrderByOperator logicalOrderByOp)
+            throws DBException {
+        PhysicalOperator child = generateOperator(dbManager, logicalOrderByOp.getChild());
+        return new OrderByOperator(child, logicalOrderByOp.getOrderByElements());
+    }
+
+    private static PhysicalOperator handleMaxMin(DBManager dbManager, LogicalMaxMinOperator logicalMaxMinOp)
+            throws DBException {
+        PhysicalOperator child = generateOperator(dbManager, logicalMaxMinOp.getChild());
+        return new MaxMinOperator(child, logicalMaxMinOp.isMax(),
+                logicalMaxMinOp.getColumnName(), logicalMaxMinOp.getTableName());
+    }
+
+    private static PhysicalOperator handleGroupBy(DBManager dbManager, LogicalGroupByOperator logicalGroupByOp)
+            throws DBException {
+        PhysicalOperator child = generateOperator(dbManager, logicalGroupByOp.getChild());
+        return new GroupByOperator(child, logicalGroupByOp.getGroupByElement(),
+                logicalGroupByOp.getSelectItems(), logicalGroupByOp.getTableName());
     }
 
     private static UpdateSet mergeUpdateSets(List<UpdateSet> updateSets) {

@@ -32,6 +32,8 @@ import java.util.Map;
 import java.util.function.IntFunction;
 
 public class DBManager {
+    private static DBManager instance;
+
     private final MetaManager metaManager;
     /* --- --- --- */
     private final DiskManager diskManager;
@@ -56,6 +58,11 @@ public class DBManager {
         this.replacerFactory = replacerFactory;
         this.transactionManager = transactionManager == null ? new TransactionManager(this) : transactionManager;
         this.runtimeIndexes = new HashMap<>();
+        instance = this;
+    }
+
+    public static DBManager getInstance() {
+        return instance;
     }
 
     public TransactionManager getTransactionManager() {

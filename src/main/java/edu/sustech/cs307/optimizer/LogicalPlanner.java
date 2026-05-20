@@ -1,36 +1,37 @@
 package edu.sustech.cs307.optimizer;
 
 import java.io.StringReader;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import edu.sustech.cs307.exception.DBException;
+import edu.sustech.cs307.exception.ExceptionTypes;
+import edu.sustech.cs307.logicalOperator.*;
+import edu.sustech.cs307.logicalOperator.ddl.AlterTableExecutor;
+import edu.sustech.cs307.logicalOperator.ddl.CreateTableExecutor;
+import edu.sustech.cs307.logicalOperator.ddl.ExplainExecutor;
+import edu.sustech.cs307.logicalOperator.ddl.ShowDatabaseExecutor;
+import edu.sustech.cs307.system.DBManager;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.Function;
-import net.sf.jsqlparser.schema.Column;
+import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParserManager;
 import net.sf.jsqlparser.parser.JSqlParser;
+import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.Commit;
+import net.sf.jsqlparser.statement.DescribeStatement;
 import net.sf.jsqlparser.statement.ExplainStatement;
 import net.sf.jsqlparser.statement.ShowStatement;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.alter.Alter;
-import net.sf.jsqlparser.statement.delete.Delete;
-import net.sf.jsqlparser.statement.drop.Drop;
-import net.sf.jsqlparser.statement.select.*;
-import net.sf.jsqlparser.statement.select.AllColumns;
-import net.sf.jsqlparser.statement.update.Update;
-import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.create.index.CreateIndex;
 import net.sf.jsqlparser.statement.create.table.CreateTable;
-
-import edu.sustech.cs307.exception.ExceptionTypes;
-import edu.sustech.cs307.logicalOperator.*;
-import edu.sustech.cs307.logicalOperator.ddl.AlterTableExecutor;
-import edu.sustech.cs307.system.DBManager;
-import edu.sustech.cs307.logicalOperator.ddl.CreateTableExecutor;
-import edu.sustech.cs307.logicalOperator.ddl.ExplainExecutor;
-import edu.sustech.cs307.logicalOperator.ddl.ShowDatabaseExecutor;
-import edu.sustech.cs307.exception.DBException;
+import net.sf.jsqlparser.statement.delete.Delete;
+import net.sf.jsqlparser.statement.drop.Drop;
+import net.sf.jsqlparser.statement.insert.Insert;
+import net.sf.jsqlparser.statement.select.*;
+import net.sf.jsqlparser.statement.update.Update;
 
 public class LogicalPlanner {
     // REVIEW(Task 5.1 Complete Command Interface, Task 4.1 Transaction API): Replace
@@ -56,78 +57,66 @@ public class LogicalPlanner {
         if (handleManualTransactionCommand(dbManager, sql)) {
             return null;
         }
+
         JSqlParser parser = new CCJSqlParserManager();
-        Statement stmt = null;
+        Statement stmt;
         try {
             stmt = parser.parse(new StringReader(sql));
         } catch (JSQLParserException e) {
             throw new DBException(ExceptionTypes.InvalidSQL(sql, e.getMessage()));
         }
-        LogicalOperator operator = null;
-        // Task 2.0 Basic SQL Statement Implementation: parse SQL statements and
-        // construct logical operators or execute immediate DDL/transaction commands.
-        // Query
+
         if (stmt instanceof Select selectStmt) {
-            operator = handleSelect(dbManager, selectStmt);
+            return handleSelect(dbManager, selectStmt);
         } else if (stmt instanceof Insert insertStmt) {
-            operator = handleInsert(dbManager, insertStmt);
+            return handleInsert(dbManager, insertStmt);
         } else if (stmt instanceof Update updateStmt) {
-            operator = handleUpdate(dbManager, updateStmt);
-        }else if (stmt instanceof Commit) {
+            return handleUpdate(dbManager, updateStmt);
+        } else if (stmt instanceof Commit) {
             dbManager.commitTransaction();
             return null;
-        }
-        else if (stmt instanceof Delete deleteStmt) {
-            operator = handleDelete(dbManager, deleteStmt);
-        }
-        else if (stmt instanceof CreateIndex createIndexStmt) {
-            // Task 3.1 Index Support - CREATE INDEX: parse one-column index DDL
-            // and build the corresponding runtime B+Tree.
+        } else if (stmt instanceof Delete deleteStmt) {
+            return handleDelete(dbManager, deleteStmt);
+        } else if (stmt instanceof CreateIndex createIndexStmt) {
             handleCreateIndex(dbManager, createIndexStmt);
             return null;
         } else if (stmt instanceof Drop dropStmt && "INDEX".equalsIgnoreCase(dropStmt.getType())) {
-            // Task 3.1 Index Support - DROP INDEX: remove index metadata and its
-            // runtime tree.
             dbManager.dropIndex(dropStmt.getName().getName());
             return null;
         } else if (stmt instanceof Alter alterStmt) {
-            AlterTableExecutor alterTableExecutor = new AlterTableExecutor(alterStmt, dbManager);
-            alterTableExecutor.execute();
+            new AlterTableExecutor(alterStmt, dbManager).execute();
             return null;
-        }
-        // functional
-        else if (stmt instanceof CreateTable createTableStmt) {
+        } else if (stmt instanceof CreateTable createTableStmt) {
             // REVIEW(Task 2.1.1 Basic DDL - CREATE TABLE): CREATE TABLE is executed
             // directly during logical planning instead of returning a logical DDL node.
-            CreateTableExecutor createTable = new CreateTableExecutor(createTableStmt, dbManager, sql);
-            createTable.execute();
+            new CreateTableExecutor(createTableStmt, dbManager, sql).execute();
             return null;
         } else if (stmt instanceof ExplainStatement explainStatement) {
             // REVIEW(Task 2.1.1 Basic DDL - EXPLAIN): EXPLAIN is handled as an
             // immediate side-effect command, so it cannot be composed or tested as
             // a result-producing operator yet.
-            ExplainExecutor explainExecutor = new ExplainExecutor(explainStatement, dbManager);
-            explainExecutor.execute();
+            new ExplainExecutor(explainStatement, dbManager).execute();
+            return null;
+        } else if (stmt instanceof DescribeStatement describeStatement) {
+            dbManager.descTable(describeStatement.getTable().getName());
             return null;
         } else if (stmt instanceof ShowStatement showStatement) {
             // REVIEW(Task 2.1.1 Basic DDL - SHOW TABLES): SHOW is parsed separately
             // from normal operator planning and writes output through the executor.
-            ShowDatabaseExecutor showDatabaseExecutor = new ShowDatabaseExecutor(showStatement);
-            showDatabaseExecutor.execute();
+            new ShowDatabaseExecutor(showStatement).execute();
             return null;
-        } else {
-            throw new DBException(ExceptionTypes.UnsupportedCommand((stmt.toString())));
         }
-        return operator;
+        throw new DBException(ExceptionTypes.UnsupportedCommand((stmt.toString())));
     }
-
 
     public static LogicalOperator handleSelect(DBManager dbManager, Select selectStmt) throws DBException {
         PlainSelect plainSelect = selectStmt.getPlainSelect();
         if (plainSelect.getFromItem() == null) {
             throw new DBException(ExceptionTypes.UnsupportedCommand((plainSelect.toString())));
         }
-        LogicalOperator root = new LogicalTableScanOperator(plainSelect.getFromItem().toString(), dbManager);
+
+        String tableName = plainSelect.getFromItem().toString();
+        LogicalOperator root = new LogicalTableScanOperator(tableName, dbManager);
 
         int depth = 0;
         if (plainSelect.getJoins() != null) {
@@ -143,20 +132,26 @@ public class LogicalPlanner {
             }
         }
 
-        // 在 Join 之后应用 Filter，Filter 的输入是 Join 的结果 (root)
         if (plainSelect.getWhere() != null) {
-            // Task 2.1.2 Logical/Physical Operators - WHERE: attach parsed WHERE
-            // expressions to the logical filter node for later tuple evaluation.
             root = new LogicalFilterOperator(root, plainSelect.getWhere());
         }
+
         LogicalCountOperator countOperator = tryBuildCountOperator(root, plainSelect);
         if (countOperator != null) {
             return countOperator;
         }
-        // Task 2.1.2 Logical/Physical Operators - Projection: preserve SELECT
-        // items in a logical project node instead of always returning SELECT *.
-        root = new LogicalProjectOperator(root, plainSelect.getSelectItems());
-        return root;
+        if (isMaxMinQuery(plainSelect)) {
+            return buildMaxMinPlan(plainSelect, root, tableName);
+        }
+        if (plainSelect.getGroupBy() != null) {
+            return new LogicalGroupByOperator(root, plainSelect.getGroupBy(),
+                    plainSelect.getSelectItems(), tableName);
+        }
+        if (plainSelect.getOrderByElements() != null && !plainSelect.getOrderByElements().isEmpty()) {
+            root = new LogicalOrderByOperator(root, plainSelect.getOrderByElements());
+        }
+
+        return new LogicalProjectOperator(root, plainSelect.getSelectItems());
     }
 
     @SuppressWarnings("deprecation")
@@ -179,7 +174,7 @@ public class LogicalPlanner {
         if (function.isAllColumns()) {
             return new LogicalCountOperator(child, true, null, null);
         }
-        var parameters = function.getParameters();
+        ExpressionList<?> parameters = function.getParameters();
         if (parameters == null || parameters.getExpressions() == null || parameters.getExpressions().isEmpty()) {
             return new LogicalCountOperator(child, true, null, null);
         }
@@ -192,16 +187,36 @@ public class LogicalPlanner {
         return new LogicalCountOperator(child, false, column.getColumnName(), column.getTableName());
     }
 
+    private static boolean isMaxMinQuery(PlainSelect plainSelect) {
+        List<SelectItem<?>> selectItems = plainSelect.getSelectItems();
+        if (selectItems == null || selectItems.size() != 1) {
+            return false;
+        }
+        if (selectItems.get(0).getExpression() instanceof Function function) {
+            String name = function.getName().toLowerCase();
+            return name.equals("max") || name.equals("min");
+        }
+        return false;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static LogicalOperator buildMaxMinPlan(PlainSelect plainSelect, LogicalOperator root, String tableName) throws DBException {
+        Function function = (Function) plainSelect.getSelectItems().get(0).getExpression();
+        ExpressionList<?> parameters = function.getParameters();
+        if (parameters == null || parameters.getExpressions() == null || parameters.getExpressions().size() != 1
+                || !(parameters.getExpressions().get(0) instanceof Column column)) {
+            throw new DBException(ExceptionTypes.UnsupportedExpression(function));
+        }
+        return new LogicalMaxMinOperator(root, function.getName().equalsIgnoreCase("max"),
+                column.getColumnName(), column.getTableName() == null ? tableName : column.getTableName());
+    }
+
     private static LogicalOperator handleInsert(DBManager dbManager, Insert insertStmt) {
-        // Task 2.0.2 Data Operations: create a logical INSERT node from
-        // table, column list, and VALUES expressions.
         return new LogicalInsertOperator(insertStmt.getTable().getName(), insertStmt.getColumns(),
                 insertStmt.getValues());
     }
 
     private static LogicalOperator handleUpdate(DBManager dbManager, Update updateStmt) throws DBException {
-        // Task 2.0.2 Data Operations: plan UPDATE as table scan plus
-        // update-set and optional WHERE expression.
         LogicalOperator root = new LogicalTableScanOperator(updateStmt.getTable().getName(), dbManager);
         return new LogicalUpdateOperator(root, updateStmt.getTable().getName(), updateStmt.getUpdateSets(),
                 updateStmt.getWhere());
@@ -268,6 +283,4 @@ public class LogicalPlanner {
         }
         return false;
     }
-
-
 }

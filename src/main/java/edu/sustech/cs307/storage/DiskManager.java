@@ -29,8 +29,8 @@ public class DiskManager {
 
     private static final String DISK_MANAGER_META = "disk_manager_meta.json";
 
-    public static Map<String, Integer> read_disk_manager_meta() throws DBException {
-        Path path = Path.of(String.format("%s/%s", DBEntry.DB_NAME, DISK_MANAGER_META));
+    public static Map<String, Integer> read_disk_manager_meta(String rootPath) throws DBException {
+        Path path = Path.of(String.format("%s/%s", rootPath, DISK_MANAGER_META));
         // read the meta file
         File META_FILE = new File(path.toString());
         if (!META_FILE.exists()) {
@@ -61,7 +61,7 @@ public class DiskManager {
 
     public static void dump_disk_manager_meta(DiskManager disk_manager) throws DBException {
         Map<String, Integer> filePages = disk_manager.filePages;
-        Path path = Path.of(String.format("%s/%s", DBEntry.DB_NAME, DISK_MANAGER_META));
+        Path path = Path.of(String.format("%s/%s", disk_manager.getCurrentDir(), DISK_MANAGER_META));
         // write the meta file
         File META_FILE = new File(path.toString());
         try (Writer writer = new FileWriter(META_FILE)) {

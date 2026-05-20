@@ -44,7 +44,7 @@ public class DBEntry {
         Logger.info("Initializing..."); 
         DBManager dbManager = null;
         try {
-            Map<String, Integer> disk_manager_meta = new HashMap<>(DiskManager.read_disk_manager_meta());
+            Map<String, Integer> disk_manager_meta = new HashMap<>(DiskManager.read_disk_manager_meta(DB_NAME));
             DiskManager diskManager = new DiskManager(DB_NAME, disk_manager_meta);
             BufferPool bufferPool = new BufferPool(POOL_SIZE, diskManager);
             RecordManager recordManager = new RecordManager(diskManager, bufferPool);

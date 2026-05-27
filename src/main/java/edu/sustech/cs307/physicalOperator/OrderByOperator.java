@@ -14,6 +14,27 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+/**
+ * ORDER BY 排序算子 — Q&A（Task 2 Advanced）。
+ *
+ * 实现方式：物化排序（materialize-then-sort）。
+ *
+ * 执行流程：
+ * 1. Begin() 把子算子的所有行读入内存 List<Tuple>
+ * 2. 用自定义 Comparator 排序
+ * 3. 按排序后顺序逐行输出
+ *
+ * 排序比较规则：
+ * - 支持多列排序（ORDER BY col1 ASC, col2 DESC）
+ * - 按 orderByElements 顺序依次比较
+ * - 第一列相同则比较第二列，以此类推
+ * - ASC/DESC 通过 ValueComparer 返回值的正负号控制
+ *
+ * 设计权衡：
+ * - 优点：实现简单
+ * - 缺点：全部数据需加载到内存，大数据集可能 OOM
+ *   生产级数据库会用外部排序（external sort）或利用索引避免排序
+ */
 public class OrderByOperator implements PhysicalOperator {
     private final PhysicalOperator child;
     private final List<OrderByElement> orderByElements;
@@ -35,6 +56,11 @@ public class OrderByOperator implements PhysicalOperator {
         return isOpen && sortedTuples != null && currentIndex < sortedTuples.size();
     }
 
+    /**
+     * 物化 + 排序：
+     * 1. 把子算子所有行读入 sortedTuples
+     * 2. 构建 Comparator 并排序
+     */
     @Override
     public void Begin() throws DBException {
         isOpen = true;
@@ -83,6 +109,14 @@ public class OrderByOperator implements PhysicalOperator {
         return child.outputSchema();
     }
 
+    /**
+     * 构建多列排序的 Comparator。
+     * 对每个 OrderByElement 依次比较，第一列不等则返回结果，
+     * 相等则继续比较下一列。
+     *
+     * ASC:  直接返回 cmp
+     * DESC: 返回 -cmp（反转顺序）
+     */
     private Comparator<Tuple> buildComparator() {
         ArrayList<ColumnMeta> schema = child.outputSchema();
 
@@ -111,10 +145,14 @@ public class OrderByOperator implements PhysicalOperator {
                     throw new RuntimeException("OrderBy comparison failed: " + e.getMessage(), e);
                 }
             }
-            return 0;
+            return 0;  // 所有排序列都相等
         };
     }
 
+    /**
+     * 解析列引用：如果 Column 不带表名（如 ORDER BY id），
+     * 从子算子的 outputSchema 中查找匹配的列。
+     */
     private TabCol resolveColumn(Column col, ArrayList<ColumnMeta> schema) {
         String tableName = col.getTableName();
         String columnName = col.getColumnName();

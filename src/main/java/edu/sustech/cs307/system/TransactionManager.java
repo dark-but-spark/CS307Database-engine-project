@@ -29,6 +29,13 @@ import java.util.Map;
  * 跨页快照 vs WAL：
  * 本实现使用整个目录的文件复制作为快照，适合教学场景的单用户数据库。
  * 生产级数据库使用 Write-Ahead Logging (WAL)，记录操作日志而非整页快照。
+ *
+ * Task 4 完成状态速查：
+ * - rollback()、savepoint(String)、rollbackToSavepoint(String)、releaseSavepoint(String)
+ *   已由 TransactionManagerTest 覆盖。
+ * - 同名 SAVEPOINT 使用栈语义，rollback/release 都作用于最近同名保存点。
+ * - ROLLBACK TO SAVEPOINT 后目标保存点保留，可以继续回滚到同一个点。
+ * - 事务外 COMMIT/ROLLBACK 是 no-op，事务外 SAVEPOINT/ROLLBACK TO/RELEASE 会抛错。
  */
 public class TransactionManager {
 

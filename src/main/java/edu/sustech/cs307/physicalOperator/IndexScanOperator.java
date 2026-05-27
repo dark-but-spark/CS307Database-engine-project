@@ -33,6 +33,10 @@ import java.util.AbstractMap;
  * <p>REVIEW(Task 3.1 Index Support - B+Tree Index Scan): IndexScanOperator 每次 Next()
  * 会从 FileHandle 按 RID 读取记录。当结果集很大时，这会产生大量随机 I/O。
  * 后续可以引入批量预取（batch RID → page lookup）来减少 pin/unpin 开销。</p>
+ *
+ * <p>Task 3.1 Index 查询执行速查：PhysicalPlanner 负责把可索引 WHERE 条件转成
+ * IndexScanOperator；本算子只按索引迭代 RID 并读取 TableTuple，不自己判断完整 WHERE。
+ * 因此上层通常还会包一层 FilterOperator 来处理未被索引吸收的 residual predicate。</p>
  */
 public class IndexScanOperator implements PhysicalOperator {
 

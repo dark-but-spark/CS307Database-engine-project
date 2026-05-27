@@ -86,6 +86,12 @@ public class PhysicalPlanner {
             throws DBException {
         // Task 3.1 Index Support - Indexed Access Path: use B+Tree scans for
         // equality/range predicates that can be extracted from single-table WHERE.
+        // Task 3.1 索引查询优化速查：
+        // 1. 这里只优化 LogicalTableScanOperator 上方的单表 WHERE。
+        // 2. tryBuildIndexScan 会把 AND 拆成多个条件，并识别 =、>、>=、<、<=、BETWEEN。
+        // 3. 如果某个条件命中已建索引列，就把同一列上的多个边界合并为最紧 IndexBounds。
+        // 4. 生成 IndexScanOperator 后仍然外包 FilterOperator，索引用于缩小候选 RID，
+        //    完整 WHERE 语义由 FilterOperator 再检查，避免 residual predicate 漏判。
         // TODO(Task 3.1): Consider OR predicates, multi-index intersections, and
         // simple cost estimates instead of choosing the first usable index.
         PhysicalOperator indexScan = tryBuildIndexScan(dbManager, logicalFilterOp);

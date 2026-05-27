@@ -116,12 +116,51 @@ public class BPlusTreeIndex implements Index {
     }
 
     public String printTree() {
-        // REVIEW(Task 3.1 Index Support - Print B+Tree Nodes): the imported tree's
-        // toString prints node key layout, but keys are adapter objects. A more
-        // report-friendly printer should expose typed Value text per node.
-        // TODO(Task 3.1): Add a typed B+Tree node printer that includes key
-        // values, RID buckets, and tree levels for presentation/debugging.
-        return "B+Tree[" + tableName + "." + indexName + " on " + columnName + "]\n" + tree;
+        StringBuilder builder = new StringBuilder();
+        builder.append("B+Tree[")
+                .append(tableName)
+                .append(".")
+                .append(indexName)
+                .append(" on ")
+                .append(columnName)
+                .append("]\n");
+        builder.append("keys=").append(keys.size()).append('\n');
+        builder.append("leaf[0] ");
+        if (keys.isEmpty()) {
+            builder.append("[]");
+            return builder.toString();
+        }
+
+        builder.append('[');
+        boolean firstKey = true;
+        for (ValueIndexKey key : keys) {
+            if (!firstKey) {
+                builder.append(", ");
+            }
+            firstKey = false;
+            builder.append(key.value()).append(" -> ");
+            appendRidBucket(builder, tree.search(key));
+        }
+        builder.append(']');
+        return builder.toString();
+    }
+
+    private void appendRidBucket(StringBuilder builder, List<RID> bucket) {
+        builder.append('[');
+        if (bucket != null) {
+            for (int i = 0; i < bucket.size(); i++) {
+                if (i > 0) {
+                    builder.append(", ");
+                }
+                RID rid = bucket.get(i);
+                builder.append('(')
+                        .append(rid.pageNum)
+                        .append(',')
+                        .append(rid.slotNum)
+                        .append(')');
+            }
+        }
+        builder.append(']');
     }
 
     private Iterator<Entry<Value, RID>> flatten(Iterable<ValueIndexKey> orderedKeys) {

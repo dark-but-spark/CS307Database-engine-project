@@ -175,28 +175,30 @@ public class LogicalPlanner {
             return null;
         }
 
-        if (function.isDistinct() || function.isUnique()) {
-            // REVIEW(Task 2.1.3 Sequential Scan Implementation - COUNT): COUNT
-            // DISTINCT is intentionally rejected until duplicate elimination is
-            // implemented for aggregate inputs.
-            // TODO(Task 2.1.3/2.2): Implement duplicate elimination for
-            // COUNT(DISTINCT column) and grouped distinct aggregates.
+        boolean distinct = function.isDistinct() || function.isUnique();
+        if (distinct && function.isAllColumns()) {
             throw new DBException(ExceptionTypes.UnsupportedExpression(function));
         }
         if (function.isAllColumns()) {
-            return new LogicalCountOperator(child, true, null, null);
+            return new LogicalCountOperator(child, true, false, null, null);
         }
         ExpressionList<?> parameters = function.getParameters();
         if (parameters == null || parameters.getExpressions() == null || parameters.getExpressions().isEmpty()) {
-            return new LogicalCountOperator(child, true, null, null);
+            if (distinct) {
+                throw new DBException(ExceptionTypes.UnsupportedExpression(function));
+            }
+            return new LogicalCountOperator(child, true, false, null, null);
         }
         if (parameters.getExpressions().size() == 1 && parameters.getExpressions().get(0) instanceof AllColumns) {
-            return new LogicalCountOperator(child, true, null, null);
+            if (distinct) {
+                throw new DBException(ExceptionTypes.UnsupportedExpression(function));
+            }
+            return new LogicalCountOperator(child, true, false, null, null);
         }
         if (parameters.getExpressions().size() != 1 || !(parameters.getExpressions().get(0) instanceof Column column)) {
             throw new DBException(ExceptionTypes.UnsupportedExpression(function));
         }
-        return new LogicalCountOperator(child, false, column.getColumnName(), column.getTableName());
+        return new LogicalCountOperator(child, false, distinct, column.getColumnName(), column.getTableName());
     }
 
     private static boolean isMaxMinQuery(PlainSelect plainSelect) {

@@ -23,10 +23,15 @@ import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.regex.Pattern;
 
 public abstract class Tuple {
+    private static final ThreadLocal<Deque<Tuple>> OUTER_SCOPES =
+            ThreadLocal.withInitial(ArrayDeque::new);
+
     public abstract Value getValue(TabCol tabCol) throws DBException;
 
     public abstract TabCol[] getTupleSchema();
@@ -159,56 +164,50 @@ public abstract class Tuple {
     }
 
     private List<Value> executeSubQuery(Tuple tuple, String rawSql) throws DBException {
-        // TODO(Task 2.2): Replace string substitution for correlated subqueries
-        // with a scoped expression evaluator to avoid accidental text rewrites.
         DBManager dbManager = DBManager.getInstance();
         if (dbManager == null) {
             throw new DBException(ExceptionTypes.UnsupportedExpression(new StringValue(rawSql)));
         }
-        String sql = substituteOuterRefs(tuple, rawSql);
-        var plan = LogicalPlanner.resolveAndPlan(dbManager, sql);
-        if (plan == null) {
-            return new ArrayList<>();
-        }
-        PhysicalOperator exec = PhysicalPlanner.generateOperator(dbManager, plan);
-        List<Value> results = new ArrayList<>();
-        exec.Begin();
+        String sql = normalizeSubQuerySql(rawSql);
+        OUTER_SCOPES.get().push(tuple);
         try {
-            while (exec.hasNext()) {
-                exec.Next();
-                Tuple row = exec.Current();
-                if (row != null) {
-                    Value[] values = row.getValues();
-                    if (values.length > 0) {
-                        results.add(values[0]);
+            var plan = LogicalPlanner.resolveAndPlan(dbManager, sql);
+            if (plan == null) {
+                return new ArrayList<>();
+            }
+            PhysicalOperator exec = PhysicalPlanner.generateOperator(dbManager, plan);
+            List<Value> results = new ArrayList<>();
+            exec.Begin();
+            try {
+                while (exec.hasNext()) {
+                    exec.Next();
+                    Tuple row = exec.Current();
+                    if (row != null) {
+                        Value[] values = row.getValues();
+                        if (values.length > 0) {
+                            results.add(values[0]);
+                        }
                     }
                 }
+            } finally {
+                exec.Close();
             }
+            return results;
         } finally {
-            exec.Close();
-        }
-        return results;
-    }
-
-    private String substituteOuterRefs(Tuple tuple, String sql) throws DBException {
-        String result = sql;
-        for (TabCol column : tuple.getTupleSchema()) {
-            Value value = tuple.getValue(column);
-            if (value == null) {
-                continue;
+            Deque<Tuple> scopes = OUTER_SCOPES.get();
+            scopes.pop();
+            if (scopes.isEmpty()) {
+                OUTER_SCOPES.remove();
             }
-            String qualified = column.getTableName() + "." + column.getColumnName();
-            result = result.replace(qualified, formatValueForSql(value));
         }
-        return result;
     }
 
-    private String formatValueForSql(Value value) {
-        return switch (value.type) {
-            case INTEGER, FLOAT -> value.value.toString();
-            case CHAR -> "'" + value.value.toString().replace("'", "''") + "'";
-            case UNKNOWN -> value.value.toString();
-        };
+    private String normalizeSubQuerySql(String rawSql) {
+        String sql = rawSql == null ? "" : rawSql.trim();
+        if (sql.startsWith("(") && sql.endsWith(")")) {
+            return sql.substring(1, sql.length() - 1).trim();
+        }
+        return sql;
     }
 
     private String likePatternToRegex(String pattern) {
@@ -254,7 +253,11 @@ public abstract class Tuple {
         String tableName = column.getTableName();
         String columnName = column.getColumnName();
         if (tableName != null && !tableName.isBlank()) {
-            return tuple.getValue(new TabCol(tableName, columnName));
+            Value localValue = tuple.getValue(new TabCol(tableName, columnName));
+            if (localValue != null) {
+                return localValue;
+            }
+            return resolveOuterColumnValue(column);
         }
 
         Value matchedValue = null;
@@ -269,6 +272,41 @@ public abstract class Tuple {
             // REVIEW(Task 2.1.2 Logical/Physical Operators - WHERE): Ambiguous
             // unqualified columns should eventually surface a dedicated
             // ambiguity error type instead of a generic invalid SQL error.
+            throw new DBException(ExceptionTypes.InvalidSQL(column.toString(), "Ambiguous column reference"));
+        }
+        if (matchedCount == 1) {
+            return matchedValue;
+        }
+        return resolveOuterColumnValue(column);
+    }
+
+    private Value resolveOuterColumnValue(Column column) throws DBException {
+        Deque<Tuple> scopes = OUTER_SCOPES.get();
+        if (scopes.isEmpty()) {
+            return null;
+        }
+
+        String requestedTable = column.getTableName();
+        String requestedColumn = column.getColumnName();
+        Value matchedValue = null;
+        int matchedCount = 0;
+        for (Tuple outerTuple : scopes) {
+            for (TabCol tabCol : outerTuple.getTupleSchema()) {
+                if (!tabCol.getColumnName().equalsIgnoreCase(requestedColumn)) {
+                    continue;
+                }
+                if (requestedTable != null && !requestedTable.isBlank()
+                        && !tabCol.getTableName().equalsIgnoreCase(requestedTable)) {
+                    continue;
+                }
+                matchedValue = outerTuple.getValue(tabCol);
+                matchedCount++;
+            }
+            if (matchedCount > 0) {
+                break;
+            }
+        }
+        if (matchedCount > 1) {
             throw new DBException(ExceptionTypes.InvalidSQL(column.toString(), "Ambiguous column reference"));
         }
         return matchedValue;

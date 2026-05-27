@@ -10,23 +10,33 @@ import edu.sustech.cs307.value.Value;
 import edu.sustech.cs307.value.ValueType;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 
 public class CountOperator implements PhysicalOperator {
     private final PhysicalOperator child;
     private final boolean isStar;
+    private final boolean distinct;
     private final String columnName;
     private final String tableName;
 
     private int count;
     private boolean isDone;
+    private final Set<String> distinctValues;
 
     public CountOperator(PhysicalOperator child, boolean isStar, String columnName, String tableName) {
+        this(child, isStar, false, columnName, tableName);
+    }
+
+    public CountOperator(PhysicalOperator child, boolean isStar, boolean distinct, String columnName, String tableName) {
         this.child = child;
         this.isStar = isStar;
+        this.distinct = distinct;
         this.columnName = columnName;
         this.tableName = tableName;
         this.count = 0;
         this.isDone = false;
+        this.distinctValues = new HashSet<>();
     }
 
     @Override
@@ -38,6 +48,7 @@ public class CountOperator implements PhysicalOperator {
     public void Begin() throws DBException {
         count = 0;
         isDone = false;
+        distinctValues.clear();
         child.Begin();
         while (child.hasNext()) {
             child.Next();
@@ -50,7 +61,9 @@ public class CountOperator implements PhysicalOperator {
             } else {
                 Value colValue = getColumnValue(tuple);
                 if (colValue != null) {
-                    count++;
+                    if (!distinct || distinctValues.add(distinctKey(colValue))) {
+                        count++;
+                    }
                 }
             }
         }
@@ -104,5 +117,9 @@ public class CountOperator implements PhysicalOperator {
                     "Ambiguous column reference"));
         }
         return matchedValue;
+    }
+
+    private String distinctKey(Value value) {
+        return value.type + "\u0000" + String.valueOf(value.value);
     }
 }

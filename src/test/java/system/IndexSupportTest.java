@@ -44,7 +44,11 @@ class IndexSupportTest {
         BPlusTreeIndex index = dbManager.getIndex("users", "idx_users_id");
         assertThat(dbManager.getMetaManager().getTable("users").getIndexColumn("idx_users_id")).isEqualTo("id");
         assertThat(index.EqualTo(new Value(2L))).isNotNull();
-        assertThat(index.printTree()).contains("idx_users_id").contains("1").contains("2");
+        assertThat(index.printTree())
+                .contains("idx_users_id")
+                .contains("leaf[0]")
+                .contains("1 -> [(")
+                .contains("2 -> [(");
 
         executeStatement(dbManager, "INSERT INTO users (id, name) VALUES (3, 'carol')");
         assertThat(dbManager.getIndex("users", "idx_users_id").EqualTo(new Value(3L))).isNotNull();

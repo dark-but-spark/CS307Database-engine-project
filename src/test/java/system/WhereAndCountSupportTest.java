@@ -63,6 +63,21 @@ class WhereAndCountSupportTest {
     }
 
     @Test
+    void countDistinctAggregatesUniqueColumnValues() throws DBException {
+        DBManager dbManager = buildDbManager();
+        executeStatement(dbManager, "CREATE TABLE visits (user_id int, city char)");
+        executeStatement(dbManager, "INSERT INTO visits (user_id, city) VALUES (1, 'shenzhen')");
+        executeStatement(dbManager, "INSERT INTO visits (user_id, city) VALUES (1, 'shenzhen')");
+        executeStatement(dbManager, "INSERT INTO visits (user_id, city) VALUES (2, 'guangzhou')");
+        executeStatement(dbManager, "INSERT INTO visits (user_id, city) VALUES (3, 'shenzhen')");
+
+        assertThat(singleLong(dbManager, "SELECT COUNT(DISTINCT user_id) FROM visits"))
+                .isEqualTo(3L);
+        assertThat(singleLong(dbManager, "SELECT COUNT(DISTINCT city) FROM visits"))
+                .isEqualTo(2L);
+    }
+
+    @Test
     void projectionResolvesUnqualifiedAndQualifiedColumns() throws DBException {
         DBManager dbManager = buildDbManager();
         seedUsers(dbManager);
@@ -88,6 +103,24 @@ class WhereAndCountSupportTest {
         assertThatThrownBy(() -> executeStatement(dbManager, "SELECT id FROM left_t JOIN right_t"))
                 .isInstanceOf(DBException.class)
                 .hasMessageContaining("Ambiguous column reference");
+    }
+
+    @Test
+    void correlatedSubqueryUsesOuterScopeWithoutRewritingTextLiterals() throws DBException {
+        DBManager dbManager = buildDbManager();
+        executeStatement(dbManager, "CREATE TABLE users (id int, name char)");
+        executeStatement(dbManager, "CREATE TABLE orders (user_id int, note char)");
+        executeStatement(dbManager, "INSERT INTO users (id, name) VALUES (1, 'alice')");
+        executeStatement(dbManager, "INSERT INTO users (id, name) VALUES (2, 'bob')");
+        executeStatement(dbManager, "INSERT INTO orders (user_id, note) VALUES (1, 'users.id')");
+        executeStatement(dbManager, "INSERT INTO orders (user_id, note) VALUES (2, 'other')");
+
+        assertThat(selectIds(dbManager,
+                "SELECT id FROM users WHERE EXISTS (SELECT user_id FROM orders WHERE orders.user_id = users.id AND note = 'users.id')"))
+                .containsExactly(1L);
+        assertThat(selectIds(dbManager,
+                "SELECT id FROM users WHERE id IN (SELECT user_id FROM orders WHERE orders.user_id = users.id)"))
+                .containsExactly(1L, 2L);
     }
 
     private void seedUsers(DBManager dbManager) throws DBException {

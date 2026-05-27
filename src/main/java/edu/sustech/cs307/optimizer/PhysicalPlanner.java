@@ -456,7 +456,7 @@ public class PhysicalPlanner {
         PhysicalOperator child = generateOperator(dbManager, logicalCountOp.getChild());
         // Task 2.1.3 Sequential Scan Implementation - COUNT: count rows from the
         // planned child pipeline, including any WHERE filters already attached.
-        return new CountOperator(child, logicalCountOp.isStar(), logicalCountOp.getColumnName(),
+        return new CountOperator(child, logicalCountOp.isStar(), logicalCountOp.isDistinct(), logicalCountOp.getColumnName(),
                 logicalCountOp.getTableName());
     }
 

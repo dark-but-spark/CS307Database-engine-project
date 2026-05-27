@@ -33,7 +33,32 @@ import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.select.*;
 import net.sf.jsqlparser.statement.update.Update;
 
+/**
+ * 逻辑计划器 — Q&A 必问（Task 2 Advanced）。
+ *
+ * 职责：将 SQL 语句解析结果转换为 LogicalOperator 树（逻辑执行计划）。
+ * 不涉及具体执行方式（那是 PhysicalPlanner 的工作），只描述"要做什么"。
+ *
+ * SQL 语句的两大类处理方式：
+ *
+ * 【DDL 类】直接执行，不生成算子树（返回 null）：
+ *   CREATE TABLE → CreateTableExecutor
+ *   DROP INDEX   → dbManager.dropIndex()
+ *   ALTER TABLE  → AlterTableExecutor
+ *   EXPLAIN      → ExplainExecutor（内部递归生成计划树并打印）
+ *   SHOW/DESCRIBE → 直接调用 dbManager 方法
+ *
+ * 【DML 类】生成 LogicalOperator 树，交给 PhysicalPlanner 执行：
+ *   SELECT → handleSelect() 构建 Project→Filter→Join→TableScan 树
+ *   INSERT → LogicalInsertOperator
+ *   UPDATE → LogicalUpdateOperator(TableScan, ...)
+ *   DELETE → handleDelete() 分情况处理（有/无 WHERE）
+ *
+ * 【事务类】通过正则匹配识别，直接调用 TransactionManager：
+ *   BEGIN / START TRANSACTION / COMMIT / ROLLBACK / SAVEPOINT / ...
+ */
 public class LogicalPlanner {
+    /** 事务命令通过正则匹配，不走 JSqlParser。 */
     // REVIEW(Task 5.1 Complete Command Interface, Task 4.1 Transaction API): Replace
     // ad-hoc transaction regex parsing with a command parser path that can share
     // statement splitting, semicolon handling, and error reporting with SQL input.
@@ -49,6 +74,14 @@ public class LogicalPlanner {
     private static final Pattern RELEASE_SAVEPOINT_PATTERN =
             Pattern.compile("(?i)^RELEASE(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
 
+    /**
+     * 主入口：SQL → LogicalOperator 树。
+     *
+     * 执行顺序：
+     * 1. 先检查是否是事务命令（正则匹配），是则直接处理
+     * 2. 用 JSqlParser 解析为标准 SQL Statement
+     * 3. 根据 Statement 类型分发到对应的 handler
+     */
     public static LogicalOperator resolveAndPlan(DBManager dbManager, String sql) throws DBException {
         if (sql == null || sql.isBlank()) {
             return null;
@@ -67,7 +100,6 @@ public class LogicalPlanner {
         } catch (JSQLParserException e) {
             throw new DBException(ExceptionTypes.InvalidSQL(sql, e.getMessage()));
         }
-
         if (stmt instanceof Select selectStmt) {
             return handleSelect(dbManager, selectStmt);
         } else if (stmt instanceof Insert insertStmt) {
@@ -117,6 +149,20 @@ public class LogicalPlanner {
         throw new DBException(ExceptionTypes.UnsupportedCommand((stmt.toString())));
     }
 
+    /**
+     * SELECT 语句的逻辑计划生成 — Q&A 重点。
+     *
+     * 计划树构建顺序（自底向上）：
+     * 1. TableScan — 最底层，从磁盘读取表数据
+     * 2. Join     — 多表连接（支持嵌套 join，按 depth 标记连接顺序）
+     * 3. 聚合检测  — 优先检测 COUNT/MAX/MIN/GROUP BY，命中则短路
+     * 4. Filter   — WHERE 条件过滤
+     * 5. OrderBy  — 排序
+     * 6. Project  — 列投影（最顶层）
+     *
+     * 聚合检测的优先级很重要：COUNT 和 MAX/MIN 是互斥的（都要求 SELECT 列表只有一个聚合函数），
+     * 必须在 GROUP BY 之前检查。
+     */
     public static LogicalOperator handleSelect(DBManager dbManager, Select selectStmt) throws DBException {
         PlainSelect plainSelect = selectStmt.getPlainSelect();
         if (plainSelect.getFromItem() == null) {
@@ -126,6 +172,7 @@ public class LogicalPlanner {
         String tableName = plainSelect.getFromItem().toString();
         LogicalOperator root = new LogicalTableScanOperator(tableName, dbManager);
 
+        // 构建 JOIN 链：A JOIN B JOIN C → Join(Join(Scan(A), Scan(B)), Scan(C))
         int depth = 0;
         if (plainSelect.getJoins() != null) {
             for (Join join : plainSelect.getJoins()) {
@@ -236,6 +283,13 @@ public class LogicalPlanner {
                 updateStmt.getWhere());
     }
 
+    /**
+     * DELETE 处理 — Q&A 重点。
+     *
+     * 分两种情况：
+     * 1. DELETE FROM t（无 WHERE）→ 直接删整张表（dropTable）
+     * 2. DELETE FROM t WHERE ... → 构建 LogicalDeleteOperator 做行级删除
+     */
     private static LogicalOperator handleDelete(DBManager dbManager, Delete deleteStmt) throws DBException {
         // Task 2.1.2 Logical/Physical Operators - DELETE: plan DELETE as a table
         // scan plus an optional WHERE expression, mirroring UPDATE.
@@ -247,6 +301,13 @@ public class LogicalPlanner {
         return new LogicalDeleteOperator(root, tableName, deleteStmt.getWhere());
     }
 
+    /**
+     * 处理 CREATE INDEX 语句。
+     * 只支持单列 BTREE 索引。调用 dbManager.createIndex()：
+     * 1. 在 TableMeta 中记录索引元数据
+     * 2. 扫描全表构建 B+Tree
+     * 3. 保存元数据到 JSON 文件
+     */
     private static void handleCreateIndex(DBManager dbManager, CreateIndex createIndexStmt) throws DBException {
         var index = createIndexStmt.getIndex();
         if (index == null || index.getName() == null || index.getColumnsNames() == null
@@ -262,6 +323,7 @@ public class LogicalPlanner {
         dbManager.createIndex(index.getName(), createIndexStmt.getTable().getName(), index.getColumnsNames().get(0));
     }
 
+    /** 去掉 SQL 末尾分号和空白 */
     private static String normalizeSql(String sql) {
         String normalizedSql = sql == null ? "" : sql.trim();
         while (normalizedSql.endsWith(";")) {
@@ -270,6 +332,10 @@ public class LogicalPlanner {
         return normalizedSql;
     }
 
+    /**
+     * 事务命令识别：用正则匹配判断 SQL 是否是事务控制语句。
+     * 事务命令不走 JSqlParser（因为 SAVEPOINT 等不是标准 SQL DML 语法）。
+     */
     private static boolean handleManualTransactionCommand(DBManager dbManager, String sql) throws DBException {
         String normalizedSql = normalizeSql(sql);
         if (BEGIN_PATTERN.matcher(normalizedSql).matches() || START_TRANSACTION_PATTERN.matcher(normalizedSql).matches()) {

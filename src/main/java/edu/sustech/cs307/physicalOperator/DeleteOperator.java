@@ -15,6 +15,22 @@ import net.sf.jsqlparser.expression.Expression;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 行级删除算子 — Q&A 必问：DELETE 的实现设计。
+ *
+ * 执行流程：
+ * 1. Begin() 打开 SeqScan 遍历全表
+ * 2. 先收集所有匹配 WHERE 条件的行的 RID（先扫描，后删除，避免边扫边删导致游标错乱）
+ * 3. 对每个 RID 调用 fileHandle.DeleteRecord(rid)
+ *    - DeleteRecord 不是物理删除数据，而是把 bitmap 对应位清零
+ *    - 被删除的记录数据仍然在磁盘上，但槽位标记为"空闲"可供后续 INSERT 复用
+ * 4. 输出：删除的行数
+ *
+ * 设计要点：
+ * - "先收集后删除"策略：扫描时不能立即删除，因为 SeqScan 依赖 bitmap 定位下一条记录，
+ *   删除会破坏 bitmap 状态导致漏扫
+ * - bitmap 标记删除：不回缩文件，空间可复用
+ */
 public class DeleteOperator implements PhysicalOperator {
     private final PhysicalOperator inputOp;
     private final DBManager dbManager;
@@ -52,6 +68,15 @@ public class DeleteOperator implements PhysicalOperator {
         return !isDone;
     }
 
+    /**
+     * 核心删除逻辑：
+     * 第一阶段：全表扫描，收集所有匹配 WHERE 条件的行的 RID
+     * 第二阶段：对收集到的 RID 逐个执行 DeleteRecord（bitmap 清零）
+     *
+     * 为什么分两阶段？
+     * SeqScan.hasNext() 依赖 bitmap 定位下一条记录。如果在扫描过程中直接删除，
+     * bitmap 变化可能导致游标错乱，漏掉某些本应被删除的行。
+     */
     @Override
     public void Begin() throws DBException {
         inputOp.Begin();

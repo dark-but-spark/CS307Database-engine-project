@@ -6,6 +6,23 @@ import java.util.Arrays;
 import java.util.Collection;
 
 
+/**
+ * 逻辑连接算子 — 对应 SQL 的 JOIN 子句。
+ *
+ * SELECT * FROM t1 JOIN t2 ON t1.id = t2.id
+ *   → LogicalJoinOperator(left=TableScan(t1), right=TableScan(t2), onExprs=[t1.id=t2.id])
+ *
+ * 有两个子节点（leftInput / rightInput），depth 标记连接深度的先后顺序。
+ *
+ * PhysicalPlanner.handleJoin() 将其转换为：
+ *   FilterOperator(
+ *     NestedLoopJoinOperator(左算子, 右算子),
+ *     joinExprs
+ *   )
+ *
+ * 即先做嵌套循环笛卡尔积，再对结果行用 join 条件过滤。
+ * 这种实现简单但性能不是最优（没有 hash join 或 sort-merge join）。
+ */
 public class LogicalJoinOperator extends LogicalOperator {
     private final Collection<Expression> onExpressions;
     private final LogicalOperator leftInput;
@@ -29,7 +46,7 @@ public class LogicalJoinOperator extends LogicalOperator {
     }
 
     public Collection<Expression> getJoinExprs() {
-        return onExpressions; // 类型转换
+        return onExpressions;
     }
 
     @Override
@@ -39,10 +56,8 @@ public class LogicalJoinOperator extends LogicalOperator {
         String[] leftLines = leftInput.toString().split("\\R");
         String[] rightLines = rightInput.toString().split("\\R");
 
-        // 当前节点
         sb.append(nodeHeader);
 
-        // 左子树处理
         if (leftLines.length > 0) {
             sb.append("\n├── ").append(leftLines[0]);
             for (int i = 1; i < leftLines.length; i++) {
@@ -50,7 +65,6 @@ public class LogicalJoinOperator extends LogicalOperator {
             }
         }
 
-        // 右子树处理
         if (rightLines.length > 0) {
             sb.append("\n└── ").append(rightLines[0]);
             for (int i = 1; i < rightLines.length; i++) {

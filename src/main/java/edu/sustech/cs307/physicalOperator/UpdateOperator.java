@@ -21,6 +21,25 @@ import io.netty.buffer.Unpooled;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.statement.update.UpdateSet;
 
+/**
+ * 更新算子 — UPDATE 的运行时执行。
+ *
+ * UPDATE t SET col1 = v1, col2 = v2 WHERE cond
+ *
+ * Begin() 执行流程：
+ * 1. 打开 SeqScan 遍历全表
+ * 2. 对每行 eval_expr(whereExpr) 判断是否匹配
+ * 3. 匹配的行执行以下步骤：
+ *    a. 保存旧值 oldValues（用于索引更新）
+ *    b. 根据 SET 子句构建新值数组 newValues（从旧值拷贝 + 覆盖 SET 指定的列）
+ *    c. RecordSerializer.writeRow() 序列化新值
+ *    d. fileHandle.UpdateRecord(rid, newBuf) 原地覆写磁盘记录
+ *    e. dbManager.updateIndexes() 同步更新 B+Tree 索引（删旧键 + 插新键）
+ * 4. 输出影响行数
+ *
+ * SET 子句值计算：tuple.evaluateExpression(updateSet.getValue(i))
+ * 支持常量值（'apple'）和表达式引用。
+ */
 public class UpdateOperator implements PhysicalOperator {
     private final SeqScanOperator seqScanOperator;
     private final DBManager dbManager;
@@ -50,10 +69,13 @@ public class UpdateOperator implements PhysicalOperator {
         return !isDone;
     }
 
+    /**
+     * 核心更新逻辑：
+     * 1. SeqScan 遍历全表
+     * 2. WHERE 条件匹配 → 构建新行 → 原地覆写 → 更新索引
+     */
     @Override
     public void Begin() throws DBException {
-        // Task 2.0.2 Data Operations - UPDATE: scan rows, evaluate WHERE, rewrite matched
-        // records, and count affected rows.
         seqScanOperator.Begin();
         RecordFileHandle fileHandle = seqScanOperator.getFileHandle();
 
@@ -66,6 +88,7 @@ public class UpdateOperator implements PhysicalOperator {
                 List<Value> newValues = new ArrayList<>(Arrays.asList(oldValues));
                 TabCol[] schema = tuple.getTupleSchema();
 
+                // 处理 SET 子句：找到对应列位置，用新值替换
                 for (int i = 0; i < this.updateSet.getColumns().size(); i++) {
                     String targetTable = updateSet.getColumn(i).getTableName();
                     if (targetTable == null) targetTable = tuple.getTableName();
@@ -84,6 +107,7 @@ public class UpdateOperator implements PhysicalOperator {
                     Value newValue = tuple.evaluateExpression(updateSet.getValue(i));
                     newValues.set(index, newValue);
                 }
+                // 序列化新行 → 原地覆写磁盘
                 ByteBuf buffer = Unpooled.buffer();
                 List<ColumnMeta> columns = new ArrayList<>();
                 for (TabCol tabCol : schema) {
@@ -98,8 +122,7 @@ public class UpdateOperator implements PhysicalOperator {
                 RecordSerializer.writeRow(buffer, newValues, columns);
 
                 fileHandle.UpdateRecord(tuple.getRID(), buffer);
-                // Task 3.1 Index Support - Dynamic UPDATE Maintenance: keep
-                // indexed keys synchronized after in-place record rewrites.
+                // 同步更新索引：删旧键 + 插新键
                 dbManager.updateIndexes(tableName, tuple.getRID(), oldValues, newValues.toArray(new Value[0]));
                 updateCount++;
             }
@@ -134,24 +157,8 @@ public class UpdateOperator implements PhysicalOperator {
         return schema;
     }
 
-    public void reset() {
-        updateCount = 0;
-        isDone = false;
-    }
-
-    public Tuple getNextTuple() {
-        if (hasNext()) {
-            Next();
-            return Current();
-        }
-        return null;
-    }
-
-    public void close() {
-        Close();
-    }
-
-    public String getTableName() {
-        return tableName;
-    }
+    public void reset() { updateCount = 0; isDone = false; }
+    public Tuple getNextTuple() { if (hasNext()) { Next(); return Current(); } return null; }
+    public void close() { Close(); }
+    public String getTableName() { return tableName; }
 }

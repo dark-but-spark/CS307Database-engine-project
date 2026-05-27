@@ -10,16 +10,29 @@ import edu.sustech.cs307.value.ValueType;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 投影算子 — 对应 SELECT 列列表的运行时执行。
+ *
+ * 包裹一个子算子，将每行通过 ProjectTuple 裁剪到只输出需要的列。
+ *
+ * SELECT * 的处理：
+ * 构造时如果 outputSchema 是 TabCol("*", "*")，展开为子算子的全部列。
+ *
+ * SELECT t.id, t.name 的处理：
+ * 每行用 ProjectTuple(inputTuple, outputSchema) 包装，
+ * ProjectTuple.getValue() 根据 outputSchema 从 inputTuple 中按名称匹配取值。
+ *
+ * outputSchema() 返回的是该算子实际输出的列元数据（从子算子 schema 中筛选匹配）。
+ */
 public class ProjectOperator implements PhysicalOperator {
     private PhysicalOperator child;
-    private List<TabCol> outputSchema; // Use bounded wildcard
+    private List<TabCol> outputSchema;
     private Tuple currentTuple;
 
-    public ProjectOperator(PhysicalOperator child, List<TabCol> outputSchema) { // Use bounded wildcard
-        // Task 2.1.2 Logical/Physical Operators - Projection: resolve SELECT *
-        // to the child schema, otherwise keep the requested output columns.
+    public ProjectOperator(PhysicalOperator child, List<TabCol> outputSchema) {
         this.child = child;
         this.outputSchema = outputSchema;
+        // SELECT *：展开为子算子的全部列
         if (this.outputSchema.size() == 1 && this.outputSchema.get(0).getTableName().equals("*")) {
             List<TabCol> newOutputSchema = new ArrayList<>();
             for (ColumnMeta tabCol : child.outputSchema()) {
@@ -45,8 +58,7 @@ public class ProjectOperator implements PhysicalOperator {
             child.Next();
             Tuple inputTuple = child.Current();
             if (inputTuple != null) {
-
-                currentTuple = new ProjectTuple(inputTuple, outputSchema); // Create ProjectTuple
+                currentTuple = new ProjectTuple(inputTuple, outputSchema);
             } else {
                 currentTuple = null;
             }
@@ -80,8 +92,6 @@ public class ProjectOperator implements PhysicalOperator {
                 }
             }
         }
-        // REVIEW(Task 2.1.2 Logical/Physical Operators - Projection): Ambiguous unqualified columns are resolved to the first matching
-        // child column, matching the current ProjectTuple lookup behavior.
         return projectedSchema;
     }
 }

@@ -11,6 +11,25 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+/**
+ * 逻辑投影算子 — 对应 SQL 的 SELECT 列列表。
+ *
+ * SELECT t.id, t.name FROM t
+ *   → LogicalProjectOperator(selectItems=[t.id, t.name])
+ *        └── LogicalTableScanOperator(table=t)
+ *
+ * SELECT * FROM t
+ *   → LogicalProjectOperator(selectItems=[AllColumns])
+ *        └── LogicalFilterOperator(condition=...)
+ *              └── LogicalTableScanOperator(table=t)
+ *
+ * getOutputSchema() 解析 SELECT 列表：
+ * - AllColumns (*) → 返回 TabCol("*", "*")，物理层展开为全部列
+ * - 具名列 → TabCol("t.id", "t.id")，物理层按名称匹配
+ *
+ * PhysicalPlanner 将其转换为 ProjectOperator，
+ * ProjectOperator 在运行时把每行投影为 ProjectTuple（只保留需要的列）。
+ */
 public class LogicalProjectOperator extends LogicalOperator {
 
     private final List<SelectItem<?>> selectItems;
@@ -26,16 +45,17 @@ public class LogicalProjectOperator extends LogicalOperator {
         return child;
     }
 
+    /**
+     * 解析 SELECT 列表，生成输出列的 TabCol 描述。
+     * SELECT * 会展开为 TabCol("*", "*")，物理层 ProjectOperator 将其展开为全部子列。
+     */
     public List<TabCol> getOutputSchema() throws DBException {
         List<TabCol> outputSchema = new ArrayList<>();
         for (SelectItem<?> selectItem : selectItems) {
             if (selectItem.getExpression() instanceof AllColumns column) {
                 outputSchema.add(new TabCol("*", "*"));
             } else {
-                // REVIEW(Task 2.1.2 Logical/Physical Operators - Projection): Qualified columns such as t.id are currently stored as
-                // both table and column text. Split Column expressions explicitly.
                 outputSchema.add(new TabCol(selectItem.getExpression().toString(), selectItem.getExpression().toString()));
-                // throw new DBException(ExceptionTypes.NotSupportedOperation(selectItem.getExpression()));
             }
         }
         return outputSchema;
@@ -46,18 +66,14 @@ public class LogicalProjectOperator extends LogicalOperator {
         StringBuilder sb = new StringBuilder();
         String nodeHeader = "ProjectOperator(selectItems=" + selectItems + ")";
         String[] childLines = child.toString().split("\\R");
-
-        // 当前节点
         sb.append(nodeHeader);
 
-        // 子节点处理
         if (childLines.length > 0) {
             sb.append("\n└── ").append(childLines[0]);
             for (int i = 1; i < childLines.length; i++) {
                 sb.append("\n    ").append(childLines[i]);
             }
         }
-
         return sb.toString();
     }
 

@@ -6,6 +6,7 @@ import edu.sustech.cs307.logicalOperator.LogicalOperator;
 import edu.sustech.cs307.meta.MetaManager;
 import edu.sustech.cs307.optimizer.LogicalPlanner;
 import edu.sustech.cs307.optimizer.PhysicalPlanner;
+import edu.sustech.cs307.physicalOperator.IndexScanOperator;
 import edu.sustech.cs307.physicalOperator.PhysicalOperator;
 import edu.sustech.cs307.storage.BufferPool;
 import edu.sustech.cs307.storage.DiskManager;
@@ -18,6 +19,7 @@ import edu.sustech.cs307.value.Value;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -98,6 +100,41 @@ class IndexSupportTest {
                 .containsExactly(2L, 3L);
     }
 
+    @Test
+    void largeIndexedTableUsesIndexScanAndMaintainsMutations() throws DBException {
+        DBManager dbManager = buildDbManager();
+
+        executeStatement(dbManager, "CREATE TABLE users (id int, name char)");
+        for (int i = 1; i <= 150; i++) {
+            executeStatement(dbManager, "INSERT INTO users (id, name) VALUES (" + i + ", 'user" + i + "')");
+        }
+        executeStatement(dbManager, "CREATE INDEX idx_users_id ON users (id)");
+
+        LogicalOperator logicalOperator = LogicalPlanner.resolveAndPlan(dbManager,
+                "SELECT id FROM users WHERE id >= 40 AND id < 50");
+        PhysicalOperator physicalOperator = PhysicalPlanner.generateOperator(dbManager, logicalOperator);
+        assertThat(containsOperator(physicalOperator, IndexScanOperator.class)).isTrue();
+
+        assertThat(queryRows(dbManager, "SELECT id FROM users WHERE id >= 40 AND id < 50"))
+                .extracting(row -> row[0])
+                .containsExactly(40L, 41L, 42L, 43L, 44L, 45L, 46L, 47L, 48L, 49L);
+
+        executeStatement(dbManager, "UPDATE users SET id = 1000 WHERE id = 45");
+        executeStatement(dbManager, "DELETE FROM users WHERE id = 46");
+
+        BPlusTreeIndex index = dbManager.getIndex("users", "idx_users_id");
+        assertThat(index.EqualTo(new Value(45L))).isNull();
+        assertThat(index.EqualTo(new Value(46L))).isNull();
+        assertThat(index.EqualTo(new Value(1000L))).isNotNull();
+
+        assertThat(queryRows(dbManager, "SELECT id FROM users WHERE id >= 44 AND id <= 47"))
+                .extracting(row -> row[0])
+                .containsExactly(44L, 47L);
+        assertThat(queryRows(dbManager, "SELECT id FROM users WHERE id = 1000"))
+                .extracting(row -> row[0])
+                .containsExactly(1000L);
+    }
+
     private void seedUsersWithIndex(DBManager dbManager) throws DBException {
         executeStatement(dbManager, "CREATE TABLE users (id int, name char)");
         executeStatement(dbManager, "INSERT INTO users (id, name) VALUES (1, 'alice')");
@@ -147,5 +184,32 @@ class IndexSupportTest {
             dbManager.getBufferPool().FlushAllPages("");
         }
         return rows;
+    }
+
+    private boolean containsOperator(Object candidate, Class<?> operatorClass) {
+        if (candidate == null) {
+            return false;
+        }
+        if (operatorClass.isInstance(candidate)) {
+            return true;
+        }
+        Class<?> type = candidate.getClass();
+        while (type != null) {
+            for (Field field : type.getDeclaredFields()) {
+                if (!PhysicalOperator.class.isAssignableFrom(field.getType())) {
+                    continue;
+                }
+                try {
+                    field.setAccessible(true);
+                    if (containsOperator(field.get(candidate), operatorClass)) {
+                        return true;
+                    }
+                } catch (IllegalAccessException ignored) {
+                    return false;
+                }
+            }
+            type = type.getSuperclass();
+        }
+        return false;
     }
 }

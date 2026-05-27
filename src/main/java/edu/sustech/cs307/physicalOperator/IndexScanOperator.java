@@ -13,10 +13,10 @@ import edu.sustech.cs307.tuple.TableTuple;
 import edu.sustech.cs307.tuple.Tuple;
 import edu.sustech.cs307.value.Value;
 
-import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map.Entry;
+import java.util.ArrayList;
+import java.util.AbstractMap;
 
 /**
  * 基于 B+Tree 索引的物理扫描算子。
@@ -30,12 +30,9 @@ import java.util.Map.Entry;
  *   <li>{@link ScanMode#RANGE} — 范围查找（WHERE col BETWEEN low AND high 或 col > value 等）</li>
  * </ul>
  *
- * <p>REVIEW(Task 3.1 Index Support - B+Tree Index Scan): IndexScanOperator 每次 Begin()
- * 会从 FileHandle 逐条按 RID 读取记录。当结果集很大时，这会产生大量随机 I/O。
- * 可以引入批量预取（batch RID → page lookup）来减少 pin/unpin 开销。</p>
- *
- * <p>TODO(Task 3.1): Add streaming index iterators and optional page-batched RID
- * lookup so large range scans do not materialize every RID up front.</p>
+ * <p>REVIEW(Task 3.1 Index Support - B+Tree Index Scan): IndexScanOperator 每次 Next()
+ * 会从 FileHandle 按 RID 读取记录。当结果集很大时，这会产生大量随机 I/O。
+ * 后续可以引入批量预取（batch RID → page lookup）来减少 pin/unpin 开销。</p>
  */
 public class IndexScanOperator implements PhysicalOperator {
 
@@ -68,9 +65,9 @@ public class IndexScanOperator implements PhysicalOperator {
     private RecordFileHandle fileHandle;
     private boolean isOpen;
 
-    // 索引结果迭代
-    private List<Entry<Value, RID>> indexResults;
-    private int resultCursor;
+    // 索引结果迭代。RID 按需读取，避免 Begin() 物化大范围结果集。
+    private Iterator<Entry<Value, RID>> indexIterator;
+    private Entry<Value, RID> nextEntry;
     private TableTuple currentTuple;
 
     // ==================== 构造函数 ====================
@@ -99,10 +96,6 @@ public class IndexScanOperator implements PhysicalOperator {
     /**
      * 范围扫描构造函数。
      *
-     * <p>REVIEW(Task 3.1 Index Support - Index Range Scan): Range scan currently
-     * materializes all matching RIDs from BPlusTreeIndex before iteration. For
-     * large ranges, a streaming iterator would reduce memory pressure.</p>
-     *
      * @param tableName       表名
      * @param dbManager       数据库管理器
      * @param indexColumnName 被索引的列名
@@ -130,8 +123,8 @@ public class IndexScanOperator implements PhysicalOperator {
 
     @Override
     public void Begin() throws DBException {
-        // Task 3.1 Index Support - B+Tree Index Scan: open the record file,
-        // retrieve index entries, and materialize matching RIDs.
+        // Task 3.1 Index Support - B+Tree Index Scan: open the record file and
+        // prepare a streaming iterator over matching index RIDs.
         tableMeta = dbManager.getMetaManager().getTable(tableName);
         fileHandle = dbManager.getRecordManager().OpenFile(tableName);
 
@@ -141,55 +134,37 @@ public class IndexScanOperator implements PhysicalOperator {
                     "No index found on column " + indexColumnName + " for table " + tableName));
         }
 
-        indexResults = new ArrayList<>();
-
-        switch (scanMode) {
-            case EQUAL -> {
-                Iterator<RID> rids = index.EqualToAll(equalValue);
-                while (rids.hasNext()) {
-                    RID rid = rids.next();
-                    indexResults.add(new java.util.AbstractMap.SimpleEntry<>(equalValue, rid));
-                }
-            }
-            case RANGE -> {
-                Iterator<Entry<Value, RID>> rangeIter;
-                if (lowValue != null && highValue != null) {
-                    // 双边界范围
-                    rangeIter = index.Range(lowValue, highValue, lowInclusive, highInclusive);
-                } else if (lowValue != null) {
-                    // 只有下界：>= low 或 > low
-                    rangeIter = index.MoreThan(lowValue, lowInclusive);
-                } else if (highValue != null) {
-                    // 只有上界：<= high 或 < high
-                    rangeIter = index.LessThan(highValue, highInclusive);
-                } else {
-                    rangeIter = index.All();
-                }
-                while (rangeIter.hasNext()) {
-                    indexResults.add(rangeIter.next());
-                }
-            }
-        }
-
-        resultCursor = 0;
+        indexIterator = switch (scanMode) {
+            case EQUAL -> equalEntries(index.EqualToAll(equalValue), equalValue);
+            case RANGE -> rangeIterator(index);
+        };
+        nextEntry = null;
         isOpen = true;
     }
 
     @Override
     public boolean hasNext() {
-        if (!isOpen) {
+        if (!isOpen || indexIterator == null) {
             return false;
         }
-        return resultCursor < indexResults.size();
+        if (nextEntry != null) {
+            return true;
+        }
+        if (!indexIterator.hasNext()) {
+            return false;
+        }
+        nextEntry = indexIterator.next();
+        return true;
     }
 
     @Override
     public void Next() {
-        if (!isOpen || resultCursor >= indexResults.size()) {
+        if (!hasNext()) {
             currentTuple = null;
             return;
         }
-        Entry<Value, RID> entry = indexResults.get(resultCursor);
+        Entry<Value, RID> entry = nextEntry;
+        nextEntry = null;
         RID rid = entry.getValue();
         try {
             Record record = fileHandle.GetRecord(rid);
@@ -197,7 +172,6 @@ public class IndexScanOperator implements PhysicalOperator {
         } catch (DBException e) {
             currentTuple = null;
         }
-        resultCursor++;
     }
 
     @Override
@@ -217,7 +191,8 @@ public class IndexScanOperator implements PhysicalOperator {
         }
         fileHandle = null;
         tableMeta = null;
-        indexResults = null;
+        indexIterator = null;
+        nextEntry = null;
         currentTuple = null;
         isOpen = false;
     }
@@ -254,5 +229,32 @@ public class IndexScanOperator implements PhysicalOperator {
      */
     public RecordFileHandle getFileHandle() {
         return fileHandle;
+    }
+
+    private Iterator<Entry<Value, RID>> equalEntries(Iterator<RID> rids, Value value) {
+        return new Iterator<>() {
+            @Override
+            public boolean hasNext() {
+                return rids.hasNext();
+            }
+
+            @Override
+            public Entry<Value, RID> next() {
+                return new AbstractMap.SimpleEntry<>(value, rids.next());
+            }
+        };
+    }
+
+    private Iterator<Entry<Value, RID>> rangeIterator(BPlusTreeIndex index) {
+        if (lowValue != null && highValue != null) {
+            return index.Range(lowValue, highValue, lowInclusive, highInclusive);
+        }
+        if (lowValue != null) {
+            return index.MoreThan(lowValue, lowInclusive);
+        }
+        if (highValue != null) {
+            return index.LessThan(highValue, highInclusive);
+        }
+        return index.All();
     }
 }

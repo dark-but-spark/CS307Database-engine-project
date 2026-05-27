@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
+import java.util.NoSuchElementException;
 import java.util.TreeSet;
 
 /**
@@ -106,7 +107,7 @@ public class BPlusTreeIndex implements Index {
     /** 等值查询 — 返回所有匹配行的 RID 迭代器 */
     public Iterator<RID> EqualToAll(Value value) {
         List<RID> bucket = tree.search(new ValueIndexKey(value));
-        return copyRids(bucket == null ? List.of() : bucket).iterator();
+        return copyRidsLazy(bucket == null ? List.of() : bucket);
     }
 
     /**
@@ -197,28 +198,58 @@ public class BPlusTreeIndex implements Index {
     }
 
     /**
-     * 展平：把多个 key 的 RID bucket 合并为 (Value, RID) 对的有序迭代器。
+     * 展平：把多个 key 的 RID bucket 合并为 (Value, RID) 对的有序懒迭代器。
      * 因为 TreeSet 遍历是有序的，所以输出的 (Value, RID) 对也是按 key 排序的。
      */
     private Iterator<Entry<Value, RID>> flatten(Iterable<ValueIndexKey> orderedKeys) {
-        List<Entry<Value, RID>> result = new ArrayList<>();
-        for (ValueIndexKey key : orderedKeys) {
-            List<RID> bucket = tree.search(key);
-            if (bucket == null) {
-                continue;
+        return new Iterator<>() {
+            private final Iterator<ValueIndexKey> keyIterator = orderedKeys.iterator();
+            private ValueIndexKey currentKey;
+            private List<RID> currentBucket = List.of();
+            private int bucketCursor = 0;
+
+            @Override
+            public boolean hasNext() {
+                advanceToNextRid();
+                return bucketCursor < currentBucket.size();
             }
-            for (RID rid : bucket) {
-                result.add(new AbstractMap.SimpleEntry<>(key.value(), new RID(rid)));
+
+            @Override
+            public Entry<Value, RID> next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                RID rid = currentBucket.get(bucketCursor++);
+                return new AbstractMap.SimpleEntry<>(currentKey.value(), new RID(rid));
             }
-        }
-        return result.iterator();
+
+            private void advanceToNextRid() {
+                while (bucketCursor >= currentBucket.size() && keyIterator.hasNext()) {
+                    currentKey = keyIterator.next();
+                    List<RID> bucket = tree.search(currentKey);
+                    currentBucket = bucket == null ? List.of() : bucket;
+                    bucketCursor = 0;
+                }
+            }
+        };
     }
 
-    private List<RID> copyRids(List<RID> rids) {
-        List<RID> result = new ArrayList<>();
-        for (RID rid : rids) {
-            result.add(new RID(rid));
-        }
-        return result;
+    private Iterator<RID> copyRidsLazy(List<RID> rids) {
+        return new Iterator<>() {
+            private int cursor = 0;
+
+            @Override
+            public boolean hasNext() {
+                return cursor < rids.size();
+            }
+
+            @Override
+            public RID next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                return new RID(rids.get(cursor++));
+            }
+        };
     }
 }

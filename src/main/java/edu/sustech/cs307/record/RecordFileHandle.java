@@ -118,7 +118,7 @@ public class RecordFileHandle {
 
         bufferPool.unpin_page(pageHandle.page.position, true);
 
-        return new RID(pageHandle.page.getPageID(), slotNum);
+        return new RID(toDataPageId(pageHandle.page), slotNum);
     }
 
     /**
@@ -162,10 +162,10 @@ public class RecordFileHandle {
      * @throws DBException 如果页面 ID 超出范围或页面无法从缓冲池中获取。
      */
     public RecordPageHandle FetchPageHandle(int pageId) throws DBException {
-        if (pageId > fileHeader.getNumberOfPages()) {
+        if (pageId < 0 || pageId >= fileHeader.getNumberOfPages() - 1) {
             throw new RuntimeException(String.format("%s: pageId %d is out of range", filename, pageId));
         }
-        PagePosition pagePosition = new PagePosition(filename, pageId * Page.DEFAULT_PAGE_SIZE);
+        PagePosition pagePosition = new PagePosition(filename, toPhysicalPageId(pageId) * Page.DEFAULT_PAGE_SIZE);
         Page page = bufferPool.FetchPage(pagePosition);
         if (page == null) {
             throw new RuntimeException(String.format("%s: pageId %d is out of range", filename, pageId));
@@ -174,7 +174,7 @@ public class RecordFileHandle {
     }
 
     public void UnpinPageHandle(int pageId, boolean is_dirty) throws DBException {
-        bufferPool.unpin_page(new PagePosition(filename, pageId), is_dirty);
+        bufferPool.unpin_page(new PagePosition(filename, toPhysicalPageId(pageId) * Page.DEFAULT_PAGE_SIZE), is_dirty);
     }
 
     /**
@@ -187,10 +187,9 @@ public class RecordFileHandle {
      * @throws DBException 如果在创建新页面时发生数据库异常
      */
     public RecordPageHandle CreateNewPageHandle() throws DBException {
-        // TODO(Task 2.0.2 Data Operations - Durability): Fix data-page numbering/allocation semantics. Page-management
-        // tests indicate a mismatch around the first full page and the next
-        // auto-allocated page, likely from mixing header page count with data
-        // page ids or incrementing filePages twice.
+        // REVIEW(Task 2.0.2 Data Operations - Durability): Disk page 0 is the
+        // record-file header, while RID.pageNum is a zero-based data-page id.
+        int logicalPageId = fileHeader.getNumberOfPages() - 1;
         Page newPage = bufferPool.NewPage(filename);
         RecordPageHandle pageHandle = new RecordPageHandle(fileHeader, newPage);
 
@@ -201,7 +200,7 @@ public class RecordFileHandle {
 
         // Update the file header
         fileHeader.setNumberOfPages(fileHeader.getNumberOfPages() + 1);
-        fileHeader.setFirstFreePage(newPage.getPageID());
+        fileHeader.setFirstFreePage(logicalPageId);
 
         return pageHandle;
     }
@@ -228,6 +227,14 @@ public class RecordFileHandle {
      */
     private void deletePageHandle(RecordPageHandle handle) {
         handle.pageHdr.setNextFreePageNo(fileHeader.getFirstFreePage());
-        fileHeader.setFirstFreePage(handle.page.getPageID());
+        fileHeader.setFirstFreePage(toDataPageId(handle.page));
+    }
+
+    private int toPhysicalPageId(int dataPageId) {
+        return dataPageId + 1;
+    }
+
+    private int toDataPageId(Page page) {
+        return page.getPageID() - 1;
     }
 }

@@ -254,9 +254,7 @@ public class BufferPool {
             page.dirty = false;
             freeList.add(i);
         }
-        // REVIEW(Task 1 Storage Management, Task 4.1 Transaction API): The replacer implementations do not expose a reset hook. The
-        // free list is repopulated so subsequent page fetches do not consult stale
-        // replacement state until the pool is filled again.
+        replacer.Reset();
     }
 
     /**

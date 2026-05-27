@@ -31,11 +31,11 @@ public class LogicalProjectOperator extends LogicalOperator {
         for (SelectItem<?> selectItem : selectItems) {
             if (selectItem.getExpression() instanceof AllColumns column) {
                 outputSchema.add(new TabCol("*", "*"));
+            } else if (selectItem.getExpression() instanceof Column column) {
+                String tableName = column.getTableName();
+                outputSchema.add(new TabCol(tableName == null ? "" : tableName, column.getColumnName()));
             } else {
-                // REVIEW(Task 2.1.2 Logical/Physical Operators - Projection): Qualified columns such as t.id are currently stored as
-                // both table and column text. Split Column expressions explicitly.
-                outputSchema.add(new TabCol(selectItem.getExpression().toString(), selectItem.getExpression().toString()));
-                // throw new DBException(ExceptionTypes.NotSupportedOperation(selectItem.getExpression()));
+                throw new DBException(ExceptionTypes.NotSupportedOperation(selectItem.getExpression()));
             }
         }
         return outputSchema;

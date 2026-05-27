@@ -39,15 +39,13 @@ public class RecordManager {
             throw new DBException(ExceptionTypes.InvalidTableWidth(record_size));
         }
         diskManager.CreateFile(filename);
-        // TODO(Task 2.0.1 Table Management): Reconcile header-page initialization with RecordManagerTest.
-        // The test expects the new file to report one allocated page after
-        // CreateFile; keep DiskManager.filePages and RecordFileHeader page
-        // counts consistent with the header/data-page convention.
+        // REVIEW(Task 2.0.1 Table Management): The header page counts as page 1;
+        // data pages start at page id 1 and are added by RecordFileHandle.
         Page page = new Page();
         diskManager.ReadPage(page, filename, 0, Page.DEFAULT_PAGE_SIZE);
         RecordFileHeader recordFileHeader = new RecordFileHeader(page.data);
         recordFileHeader.setRecordSize(record_size);
-        recordFileHeader.setNumberOfPages(0);
+        recordFileHeader.setNumberOfPages(1);
         recordFileHeader.setFirstFreePage(RecordPageHeader.NO_NEXT_FREE_PAGE);
         recordFileHeader.setNumberOfRecordsPrePage(
                 (8 * (Page.DEFAULT_PAGE_SIZE - RecordPageHeader.SIZE) / (1 + record_size * 8)));

@@ -5,11 +5,11 @@ import edu.sustech.cs307.exception.ExceptionTypes;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.meta.TabCol;
 import edu.sustech.cs307.record.RecordFileHandle;
+import edu.sustech.cs307.system.DBManager;
 import edu.sustech.cs307.tuple.TableTuple;
 import edu.sustech.cs307.tuple.TempTuple;
 import edu.sustech.cs307.tuple.Tuple;
 
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
@@ -22,20 +22,34 @@ import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.statement.update.UpdateSet;
 
 public class UpdateOperator implements PhysicalOperator {
-    private final SeqScanOperator seqScanOperator;
+    private final PhysicalOperator inputOp;
+    private final DBManager dbManager;
     private final String tableName;
     private final UpdateSet updateSet;
     private final Expression whereExpr;
 
     private int updateCount;
     private boolean isDone;
+    private RecordFileHandle fileHandle;
 
-    public UpdateOperator(PhysicalOperator inputOperator, String tableName, UpdateSet updateSet,
+    public UpdateOperator(PhysicalOperator inputOperator, DBManager dbManager, String tableName, UpdateSet updateSet,
                           Expression whereExpr) {
-        if (!(inputOperator instanceof SeqScanOperator seqScanOperator)) {
-            throw new RuntimeException("The delete operator only accepts SeqScanOperator as input");
+        // Task 3.1 Index Support - Dynamic UPDATE Maintenance: UpdateOperator now
+        // accepts both SeqScanOperator (full table scan) and IndexScanOperator
+        // (targeted index lookup) as its input pipeline.
+        // REVIEW(Task 3.1 Index Support - Dynamic UPDATE Maintenance): The
+        // fileHandle of the input scan operator is extracted during Begin()
+        // because SeqScanOperator and IndexScanOperator initialize their
+        // RecordFileHandle lazily. If this causes lifecycle coupling issues
+        // for multi-use operators, switch to a common ScanOperator interface.
+        if (!(inputOperator instanceof SeqScanOperator)
+                && !(inputOperator instanceof IndexScanOperator)) {
+            throw new RuntimeException(
+                    "UpdateOperator requires SeqScanOperator or IndexScanOperator, got: "
+                            + inputOperator.getClass().getSimpleName());
         }
-        this.seqScanOperator = seqScanOperator;
+        this.inputOp = inputOperator;
+        this.dbManager = dbManager;
         this.tableName = tableName;
         this.updateSet = updateSet;
         this.whereExpr = whereExpr;
@@ -52,12 +66,19 @@ public class UpdateOperator implements PhysicalOperator {
     public void Begin() throws DBException {
         // Task 2.0.2 Data Operations - UPDATE: scan rows, evaluate WHERE, rewrite matched
         // records, and count affected rows.
-        seqScanOperator.Begin();
-        RecordFileHandle fileHandle = seqScanOperator.getFileHandle();
+        inputOp.Begin();
+        // Extract fileHandle after Begin() so RecordFileHandle is initialized.
+        if (inputOp instanceof SeqScanOperator seqScan) {
+            this.fileHandle = seqScan.getFileHandle();
+        } else if (inputOp instanceof IndexScanOperator indexScan) {
+            this.fileHandle = indexScan.getFileHandle();
+        } else {
+            throw new RuntimeException("Unexpected scan operator type: " + inputOp.getClass().getSimpleName());
+        }
 
-        while (seqScanOperator.hasNext()) {
-            seqScanOperator.Next();
-            TableTuple tuple = (TableTuple) seqScanOperator.Current();
+        while (inputOp.hasNext()) {
+            inputOp.Next();
+            TableTuple tuple = (TableTuple) inputOp.Current();
 
             if (whereExpr == null || tuple.eval_expr(whereExpr)) {
                 Value[] oldValues = tuple.getValues();
@@ -83,18 +104,22 @@ public class UpdateOperator implements PhysicalOperator {
                     newValues.set(index, newValue);
                 }
                 ByteBuf buffer = Unpooled.buffer();
-                for (Value v : newValues) {
-                    String str = "";
-                    if (v.type == ValueType.CHAR) str = (String) v.value;
-                    if (str.length() == 64) {
-                        ByteBuffer temp = ByteBuffer.allocate(64);
-                        temp.put(str.getBytes());
-                        buffer.writeBytes(temp.array());
+                List<ColumnMeta> columns = new ArrayList<>();
+                for (TabCol tabCol : schema) {
+                    for (ColumnMeta columnMeta : inputOp.outputSchema()) {
+                        if (columnMeta.tableName.equals(tabCol.getTableName())
+                                && columnMeta.name.equals(tabCol.getColumnName())) {
+                            columns.add(columnMeta);
+                            break;
+                        }
                     }
-                    else buffer.writeBytes(v.ToByte());
                 }
+                RecordSerializer.writeRow(buffer, newValues, columns);
 
                 fileHandle.UpdateRecord(tuple.getRID(), buffer);
+                // Task 3.1 Index Support - Dynamic UPDATE Maintenance: keep
+                // indexed keys synchronized after in-place record rewrites.
+                dbManager.updateIndexes(tableName, tuple.getRID(), oldValues, newValues.toArray(new Value[0]));
                 updateCount++;
             }
         }
@@ -118,7 +143,7 @@ public class UpdateOperator implements PhysicalOperator {
 
     @Override
     public void Close() {
-        seqScanOperator.Close();
+        inputOp.Close();
     }
 
     @Override

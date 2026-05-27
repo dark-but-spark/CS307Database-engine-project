@@ -2,23 +2,38 @@ package edu.sustech.cs307.system;
 
 import edu.sustech.cs307.exception.DBException;
 import edu.sustech.cs307.exception.ExceptionTypes;
+import edu.sustech.cs307.index.BPlusTreeIndex;
 import edu.sustech.cs307.meta.ColumnMeta;
 import edu.sustech.cs307.meta.MetaManager;
 import edu.sustech.cs307.meta.TableMeta;
+import edu.sustech.cs307.physicalOperator.SeqScanOperator;
+import edu.sustech.cs307.record.RID;
+import edu.sustech.cs307.record.RecordFileHandle;
 import edu.sustech.cs307.storage.BufferPool;
 import edu.sustech.cs307.storage.DiskManager;
 import edu.sustech.cs307.storage.replacer.ClockReplacer;
 import edu.sustech.cs307.storage.replacer.PageReplacer;
+import edu.sustech.cs307.tuple.TableTuple;
+import edu.sustech.cs307.value.Value;
+import edu.sustech.cs307.value.ValueType;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.apache.commons.lang3.StringUtils;
 import org.pmw.tinylog.Logger;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.IntFunction;
 
 public class DBManager {
+    private static DBManager instance;
+
     private final MetaManager metaManager;
     /* --- --- --- */
     private final DiskManager diskManager;
@@ -26,6 +41,7 @@ public class DBManager {
     private final RecordManager recordManager;
     private TransactionManager transactionManager;
     private final IntFunction<PageReplacer> replacerFactory;
+    private final Map<String, BPlusTreeIndex> runtimeIndexes;
 
     public DBManager(DiskManager diskManager, BufferPool bufferPool, RecordManager recordManager,
                      MetaManager metaManager) {
@@ -41,6 +57,12 @@ public class DBManager {
         this.metaManager = metaManager;
         this.replacerFactory = replacerFactory;
         this.transactionManager = transactionManager == null ? new TransactionManager(this) : transactionManager;
+        this.runtimeIndexes = new HashMap<>();
+        instance = this;
+    }
+
+    public static DBManager getInstance() {
+        return instance;
     }
 
     public TransactionManager getTransactionManager() {
@@ -89,6 +111,8 @@ public class DBManager {
         Logger.info("|---------------|");
         // REVIEW(Task 2.1.1 Basic DDL - SHOW TABLES): showTables currently writes to Logger like other DDL helpers;
         // returning a result-set operator would make this easier to test.
+        // TODO(Task 2.1.1): Return SHOW TABLES as a result-set operator instead
+        // of formatting directly in DBManager.
     }
 
     public void descTable(String table_name) throws DBException {
@@ -106,6 +130,8 @@ public class DBManager {
         Logger.info("|---------------|---------------|");
         // REVIEW(Task 2.1.1 Basic DDL - DESCRIBE TABLE): descTable prints physical ValueType names; SQL type aliases can be
         // added if metadata starts preserving original DDL type names.
+        // TODO(Task 2.1.1): Preserve original SQL type aliases and return
+        // DESCRIBE output as tuples for consistent CLI/test behavior.
     }
 
     /**
@@ -136,6 +162,340 @@ public class DBManager {
         recordManager.CreateFile(data_file, record_size);
     }
 
+    public void createIndex(String indexName, String tableName, String columnName) throws DBException {
+        // Task 3.1 Index Support - CREATE INDEX: validate metadata, persist the
+        // index definition, and build an in-memory B+Tree from current table rows.
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        tableMeta.addIndex(indexName, columnName, TableMeta.IndexType.BTREE);
+        BPlusTreeIndex index = rebuildIndex(tableName, indexName);
+        metaManager.saveToJson();
+        Logger.info(index.printTree());
+    }
+
+    public void dropIndex(String indexName) throws DBException {
+        // Task 3.1 Index Support - DROP INDEX: remove the index definition and
+        // discard its runtime B+Tree.
+        for (String tableName : metaManager.getTableNames()) {
+            TableMeta tableMeta = metaManager.getTable(tableName);
+            if (tableMeta.getIndexes().containsKey(indexName)) {
+                tableMeta.dropIndex(indexName);
+                runtimeIndexes.remove(indexKey(tableName, indexName));
+                metaManager.saveToJson();
+                return;
+            }
+        }
+        throw new DBException(ExceptionTypes.InvalidSQL("DROP INDEX", "Index does not exist: " + indexName));
+    }
+
+    public void addColumn(String tableName, String columnName, String dataType) throws DBException {
+        addColumn(tableName, columnName, dataType, null);
+    }
+
+    public void addColumn(String tableName, String columnName, String dataType, Value defaultValue) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        List<Value[]> oldRows = readAllRows(tableName);
+        ValueType valueType = parseColumnType(dataType);
+        int offset = 0;
+        for (ColumnMeta columnMeta : tableMeta.columns_list) {
+            offset += columnMeta.len;
+        }
+        ColumnMeta columnMeta = new ColumnMeta(tableName, columnName, valueType, valueLength(valueType), offset);
+        tableMeta.addColumn(columnMeta);
+        List<Value[]> rewrittenRows = new ArrayList<>();
+        for (Value[] row : oldRows) {
+            Value[] rewrittenRow = new Value[row.length + 1];
+            System.arraycopy(row, 0, rewrittenRow, 0, row.length);
+            rewrittenRow[row.length] = defaultValue != null ? defaultValue : defaultValue(valueType);
+            rewrittenRows.add(rewrittenRow);
+        }
+        rewriteTableData(tableName, tableMeta, rewrittenRows);
+        metaManager.saveToJson();
+    }
+
+    public void dropColumn(String tableName, String columnName) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        if (tableMeta.columnCount() <= 1) {
+            throw new DBException(ExceptionTypes.TableHasNoColumn(tableName));
+        }
+        // DONE: TableMeta.dropColumn implicitly drops indexes on the dropped
+        // column and its index definitions.
+        int droppedColumnIndex = indexedColumnPosition(tableMeta, columnName);
+        List<Value[]> oldRows = readAllRows(tableName);
+        tableMeta.dropColumn(columnName);
+        List<Value[]> rewrittenRows = new ArrayList<>();
+        for (Value[] row : oldRows) {
+            Value[] rewrittenRow = new Value[row.length - 1];
+            int targetIndex = 0;
+            for (int sourceIndex = 0; sourceIndex < row.length; sourceIndex++) {
+                if (sourceIndex != droppedColumnIndex) {
+                    rewrittenRow[targetIndex++] = row[sourceIndex];
+                }
+            }
+            rewrittenRows.add(rewrittenRow);
+        }
+        rewriteTableData(tableName, tableMeta, rewrittenRows);
+        metaManager.saveToJson();
+    }
+
+    public void renameColumn(String tableName, String oldColumnName, String newColumnName) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        if (tableMeta.hasColumn(newColumnName)) {
+            throw new DBException(ExceptionTypes.ColumnAlreadyExist(newColumnName));
+        }
+        tableMeta.renameColumn(oldColumnName, newColumnName);
+        runtimeIndexes.keySet().removeIf(key -> key.startsWith(tableName + "#"));
+        metaManager.saveToJson();
+        Logger.info("Renamed column {} to {} in table {}", oldColumnName, newColumnName, tableName);
+    }
+
+    public void renameTable(String oldTableName, String newTableName) throws DBException {
+        if (!isTableExists(oldTableName)) {
+            throw new DBException(ExceptionTypes.TableDoesNotExist(oldTableName));
+        }
+        if (isTableExists(newTableName)) {
+            throw new DBException(ExceptionTypes.TableAlreadyExist(newTableName));
+        }
+        bufferPool.FlushAllPages(String.format("%s/%s", oldTableName, "data"));
+        File oldFolder = new File(String.format("%s/%s", diskManager.getCurrentDir(), oldTableName));
+        File newFolder = new File(String.format("%s/%s", diskManager.getCurrentDir(), newTableName));
+        if (oldFolder.exists() && !oldFolder.renameTo(newFolder)) {
+            throw new DBException(ExceptionTypes.BadIOError(
+                    String.format("Failed to rename table directory %s to %s", oldFolder, newFolder)));
+        }
+        String oldDataFile = String.format("%s/%s", oldTableName, "data");
+        String newDataFile = String.format("%s/%s", newTableName, "data");
+        Integer pageCount = diskManager.filePages.remove(oldDataFile);
+        if (pageCount != null) {
+            diskManager.filePages.put(newDataFile, pageCount);
+        }
+        runtimeIndexes.keySet().removeIf(key -> key.startsWith(oldTableName + "#"));
+        metaManager.renameTable(oldTableName, newTableName);
+    }
+
+    public void modifyColumn(String tableName, String columnName, String dataType) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        ValueType newType = parseColumnType(dataType);
+        List<Value[]> oldRows = readAllRows(tableName);
+        int columnIndex = indexedColumnPosition(tableMeta, columnName);
+        int newLen = valueLength(newType);
+        ColumnMeta columnMeta = tableMeta.getColumnMeta(columnName);
+        columnMeta.type = newType;
+        columnMeta.len = newLen;
+        tableMeta.recomputeColumnOffsets();
+        List<Value[]> rewrittenRows = new ArrayList<>();
+        for (Value[] row : oldRows) {
+            Value oldValue = row[columnIndex];
+            Value convertedValue = oldValue == null || oldValue.value == null
+                    ? defaultValue(newType)
+                    : convertValue(oldValue, newType);
+            row[columnIndex] = convertedValue;
+            rewrittenRows.add(row);
+        }
+        runtimeIndexes.keySet().removeIf(key -> key.startsWith(tableName + "#"));
+        rewriteTableData(tableName, tableMeta, rewrittenRows);
+        metaManager.saveToJson();
+        Logger.info("Modified column {} to type {} in table {}", columnName, dataType, tableName);
+    }
+
+    public BPlusTreeIndex getIndex(String tableName, String indexName) throws DBException {
+        BPlusTreeIndex index = runtimeIndexes.get(indexKey(tableName, indexName));
+        if (index == null) {
+            index = rebuildIndex(tableName, indexName);
+        }
+        return index;
+    }
+
+    public BPlusTreeIndex getIndexOnColumn(String tableName, String columnName) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        String indexName = tableMeta.findIndexOnColumn(columnName);
+        return indexName == null ? null : getIndex(tableName, indexName);
+    }
+
+    public void insertIntoIndexes(String tableName, RID rid, Value[] rowValues) throws DBException {
+        // Task 3.1 Index Support - Dynamic INSERT Maintenance: insert the new RID
+        // into every runtime B+Tree defined on this table.
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        for (String indexName : tableMeta.getIndexes().keySet()) {
+            int columnIndex = indexedColumnPosition(tableMeta, tableMeta.getIndexColumn(indexName));
+            getIndex(tableName, indexName).insert(rowValues[columnIndex], rid);
+        }
+    }
+
+    public void updateIndexes(String tableName, RID rid, Value[] oldValues, Value[] newValues) throws DBException {
+        // Task 3.1 Index Support - Dynamic UPDATE Maintenance: replace old indexed
+        // key entries with the updated row values.
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        for (String indexName : tableMeta.getIndexes().keySet()) {
+            int columnIndex = indexedColumnPosition(tableMeta, tableMeta.getIndexColumn(indexName));
+            BPlusTreeIndex index = getIndex(tableName, indexName);
+            index.delete(oldValues[columnIndex], rid);
+            index.insert(newValues[columnIndex], rid);
+        }
+    }
+
+    public void deleteFromIndexes(String tableName, RID rid, Value[] rowValues) throws DBException {
+        // Task 3.1 Index Support - Dynamic DELETE Maintenance: remove deleted
+        // rows from every runtime B+Tree defined on this table.
+        // REVIEW(Task 3.1 Index Support - Dynamic DELETE Maintenance): Runtime
+        // indexes are rebuilt lazily from table data when missing, so this only
+        // synchronizes indexes that exist in metadata for the current process.
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        for (String indexName : tableMeta.getIndexes().keySet()) {
+            int columnIndex = indexedColumnPosition(tableMeta, tableMeta.getIndexColumn(indexName));
+            getIndex(tableName, indexName).delete(rowValues[columnIndex], rid);
+        }
+    }
+
+    private BPlusTreeIndex rebuildIndex(String tableName, String indexName) throws DBException {
+        TableMeta tableMeta = metaManager.getTable(tableName);
+        String columnName = tableMeta.getIndexColumn(indexName);
+        if (columnName == null) {
+            throw new DBException(ExceptionTypes.InvalidSQL("INDEX", "Missing index column metadata: " + indexName));
+        }
+        int columnIndex = indexedColumnPosition(tableMeta, columnName);
+        BPlusTreeIndex index = new BPlusTreeIndex(tableName, indexName, columnName);
+        SeqScanOperator scanner = new SeqScanOperator(tableName, this);
+        try {
+            scanner.Begin();
+            while (scanner.hasNext()) {
+                scanner.Next();
+                TableTuple tuple = (TableTuple) scanner.Current();
+                if (tuple != null) {
+                    index.insert(tuple.getValues()[columnIndex], tuple.getRID());
+                }
+            }
+        } finally {
+            scanner.Close();
+        }
+        runtimeIndexes.put(indexKey(tableName, indexName), index);
+        return index;
+    }
+
+    private int indexedColumnPosition(TableMeta tableMeta, String columnName) throws DBException {
+        for (int i = 0; i < tableMeta.columns_list.size(); i++) {
+            if (tableMeta.columns_list.get(i).name.equalsIgnoreCase(columnName)) {
+                return i;
+            }
+        }
+        throw new DBException(ExceptionTypes.ColumnDoesNotExist(columnName));
+    }
+
+    private String indexKey(String tableName, String indexName) {
+        return tableName + "#" + indexName;
+    }
+
+    private List<Value[]> readAllRows(String tableName) throws DBException {
+        List<Value[]> rows = new ArrayList<>();
+        SeqScanOperator scanner = new SeqScanOperator(tableName, this);
+        try {
+            scanner.Begin();
+            while (scanner.hasNext()) {
+                scanner.Next();
+                TableTuple tuple = (TableTuple) scanner.Current();
+                if (tuple != null) {
+                    rows.add(tuple.getValues());
+                }
+            }
+        } finally {
+            scanner.Close();
+        }
+        return rows;
+    }
+
+    private void rewriteTableData(String tableName, TableMeta tableMeta, List<Value[]> rows) throws DBException {
+        String dataFile = String.format("%s/%s", tableName, "data");
+        bufferPool.FlushAllPages("");
+        bufferPool.DiscardAllPages();
+        recordManager.DeleteFile(dataFile);
+        recordManager.CreateFile(dataFile, recordSize(tableMeta));
+        RecordFileHandle handle = recordManager.OpenFile(tableName);
+        try {
+            for (Value[] row : rows) {
+                ByteBuf buffer = Unpooled.buffer(recordSize(tableMeta));
+                writeRow(buffer, row, tableMeta.columns_list);
+                handle.InsertRecord(buffer);
+            }
+        } finally {
+            recordManager.CloseFile(handle);
+        }
+        runtimeIndexes.keySet().removeIf(key -> key.startsWith(tableName + "#"));
+    }
+
+    private int recordSize(TableMeta tableMeta) {
+        int recordSize = 0;
+        for (ColumnMeta columnMeta : tableMeta.columns_list) {
+            recordSize += columnMeta.len;
+        }
+        return recordSize;
+    }
+
+    public ValueType parseColumnType(String dataType) throws DBException {
+        if (dataType == null) {
+            throw new DBException(ExceptionTypes.UnsupportedCommand("ALTER TABLE ADD COLUMN"));
+        }
+        if (dataType.equalsIgnoreCase("char") || dataType.equalsIgnoreCase("varchar")) {
+            return ValueType.CHAR;
+        }
+        if (dataType.equalsIgnoreCase("int") || dataType.equalsIgnoreCase("integer")) {
+            return ValueType.INTEGER;
+        }
+        if (dataType.equalsIgnoreCase("float") || dataType.equalsIgnoreCase("double")) {
+            return ValueType.FLOAT;
+        }
+        throw new DBException(ExceptionTypes.UnsupportedCommand("ALTER TABLE ADD COLUMN " + dataType));
+    }
+
+    public int valueLength(ValueType valueType) throws DBException {
+        return switch (valueType) {
+            case CHAR -> Value.CHAR_SIZE;
+            case INTEGER -> Value.INT_SIZE;
+            case FLOAT -> Value.FLOAT_SIZE;
+            default -> throw new DBException(ExceptionTypes.UnsupportedValueType(valueType));
+        };
+    }
+
+    private Value defaultValue(ValueType valueType) throws DBException {
+        return switch (valueType) {
+            case CHAR -> new Value("");
+            case INTEGER -> new Value(0L);
+            case FLOAT -> new Value(0.0);
+            default -> throw new DBException(ExceptionTypes.UnsupportedValueType(valueType));
+        };
+    }
+
+    private Value convertValue(Value oldValue, ValueType newType) throws DBException {
+        if (oldValue.type == newType) {
+            return oldValue;
+        }
+        return switch (newType) {
+            case INTEGER -> {
+                long intVal = oldValue.type == ValueType.INTEGER ? (Long) oldValue.value
+                        : ((Number) oldValue.value).longValue();
+                yield new Value(intVal, ValueType.INTEGER);
+            }
+            case FLOAT -> new Value(((Number) oldValue.value).doubleValue(), ValueType.FLOAT);
+            case CHAR -> new Value(oldValue.value.toString(), ValueType.CHAR);
+            default -> throw new DBException(ExceptionTypes.UnsupportedValueType(newType));
+        };
+    }
+
+    private void writeRow(ByteBuf buffer, Value[] row, List<ColumnMeta> columns) {
+        for (int i = 0; i < columns.size(); i++) {
+            writeValue(buffer, row[i], columns.get(i));
+        }
+    }
+
+    private void writeValue(ByteBuf buffer, Value value, ColumnMeta columnMeta) {
+        if (value.type == ValueType.CHAR) {
+            byte[] bytes = ((String) value.value).getBytes();
+            ByteBuffer fixedWidth = ByteBuffer.allocate(columnMeta.len);
+            fixedWidth.put(bytes, 0, Math.min(bytes.length, columnMeta.len));
+            buffer.writeBytes(fixedWidth.array());
+            return;
+        }
+        buffer.writeBytes(value.ToByte());
+    }
+
     /**
      * Drops a table from the database by removing its metadata and associated
      * files.
@@ -151,6 +511,7 @@ public class DBManager {
         }
         String table_folder = String.format("%s/%s", diskManager.getCurrentDir(), table_name);
         deleteDirectory(new File(table_folder));
+        runtimeIndexes.keySet().removeIf(key -> key.startsWith(table_name + "#"));
         metaManager.dropTable(table_name);
     }
 

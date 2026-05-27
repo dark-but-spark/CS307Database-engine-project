@@ -5,6 +5,7 @@ import edu.sustech.cs307.logicalOperator.LogicalOperator;
 import edu.sustech.cs307.meta.MetaManager;
 import edu.sustech.cs307.optimizer.LogicalPlanner;
 import edu.sustech.cs307.optimizer.PhysicalPlanner;
+import edu.sustech.cs307.physicalOperator.GroupByOperator;
 import edu.sustech.cs307.physicalOperator.PhysicalOperator;
 import edu.sustech.cs307.storage.BufferPool;
 import edu.sustech.cs307.storage.DiskManager;
@@ -69,6 +70,32 @@ class HighPriorityTodoCompletionTest {
         assertThatThrownBy(() -> queryRows(dbManager, "SELECT * FROM left_t JOIN right_t ORDER BY id"))
                 .isInstanceOf(DBException.class)
                 .hasMessageContaining("Ambiguous column reference");
+    }
+
+    @Test
+    void showTablesCommandMatchesProjectRequirement() throws DBException {
+        DBManager dbManager = buildDbManager();
+        executeStatement(dbManager, "CREATE TABLE users (id int)");
+
+        assertThat(queryRows(dbManager, "SHOW TABLES")).isEmpty();
+    }
+
+    @Test
+    void groupByOutputSchemaIsAvailableBeforeBeginForCliHeader() throws DBException {
+        DBManager dbManager = buildDbManager();
+        executeStatement(dbManager, "CREATE TABLE users (id int, age int)");
+        executeStatement(dbManager, "INSERT INTO users (id, age) VALUES (1, 18)");
+        executeStatement(dbManager, "INSERT INTO users (id, age) VALUES (2, 18)");
+
+        LogicalOperator plan = LogicalPlanner.resolveAndPlan(dbManager,
+                "SELECT age, COUNT(*) FROM users GROUP BY age");
+        PhysicalOperator operator = PhysicalPlanner.generateOperator(dbManager, plan);
+
+        assertThat(operator).isInstanceOf(GroupByOperator.class);
+        assertThat(operator.outputSchema()).hasSize(2);
+        assertThat(queryRows(dbManager, "SELECT age, COUNT(*) FROM users GROUP BY age"))
+                .extracting(row -> List.of(row[0], row[1]))
+                .containsExactly(List.of(18L, 2L));
     }
 
     private DBManager buildDbManager() throws DBException {

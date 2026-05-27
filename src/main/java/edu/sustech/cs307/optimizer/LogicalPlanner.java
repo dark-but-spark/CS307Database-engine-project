@@ -73,6 +73,7 @@ public class LogicalPlanner {
             Pattern.compile("(?i)^ROLLBACK\\s+TO(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
     private static final Pattern RELEASE_SAVEPOINT_PATTERN =
             Pattern.compile("(?i)^RELEASE(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
+    private static final Pattern SHOW_TABLES_PATTERN = Pattern.compile("(?i)^SHOW\\s+TABLES$");
 
     /**
      * 主入口：SQL → LogicalOperator 树。
@@ -89,7 +90,7 @@ public class LogicalPlanner {
         // REVIEW(Task 5.1 Complete Command Interface): resolveAndPlan currently
         // accepts exactly one statement. DBEntry should split batches before this
         // call, or this layer should expose a batch-planning API.
-        if (handleManualTransactionCommand(dbManager, sql)) {
+        if (handleManualCommand(dbManager, sql)) {
             return null;
         }
 
@@ -143,7 +144,7 @@ public class LogicalPlanner {
             // from normal operator planning and writes output through the executor.
             // TODO(Task 2.1.1): Model SHOW/DESCRIBE as result-producing commands
             // so CLI formatting and tests do not depend on Logger output.
-            new ShowDatabaseExecutor(showStatement).execute();
+            new ShowDatabaseExecutor(showStatement, dbManager).execute();
             return null;
         }
         throw new DBException(ExceptionTypes.UnsupportedCommand((stmt.toString())));
@@ -333,11 +334,17 @@ public class LogicalPlanner {
     }
 
     /**
-     * 事务命令识别：用正则匹配判断 SQL 是否是事务控制语句。
+     * 特殊命令识别：用正则匹配判断 SQL 是否需要绕过 JSqlParser。
      * 事务命令不走 JSqlParser（因为 SAVEPOINT 等不是标准 SQL DML 语法）。
+     * SHOW TABLES 是项目 PDF 明确要求的命令；当前 JSqlParser 版本不会把它稳定分发到
+     * ShowStatement，因此在这里直接调用 DBManager.showTables()。
      */
-    private static boolean handleManualTransactionCommand(DBManager dbManager, String sql) throws DBException {
+    private static boolean handleManualCommand(DBManager dbManager, String sql) throws DBException {
         String normalizedSql = normalizeSql(sql);
+        if (SHOW_TABLES_PATTERN.matcher(normalizedSql).matches()) {
+            dbManager.showTables();
+            return true;
+        }
         if (BEGIN_PATTERN.matcher(normalizedSql).matches() || START_TRANSACTION_PATTERN.matcher(normalizedSql).matches()) {
             dbManager.beginTransaction();
             return true;

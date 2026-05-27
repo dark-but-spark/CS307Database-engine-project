@@ -54,6 +54,7 @@ public class GroupByOperator implements PhysicalOperator {
         }
 
         parseAggregate();
+        buildOutputSchema();
         this.resultTuples = null;
         this.currentIndex = -1;
         this.isOpen = false;
@@ -119,9 +120,6 @@ public class GroupByOperator implements PhysicalOperator {
             }
         }
 
-        // Build output schema
-        buildOutputSchema();
-
         // Compute aggregate for each group
         for (var entry : groups.entrySet()) {
             String key = entry.getKey();
@@ -158,6 +156,9 @@ public class GroupByOperator implements PhysicalOperator {
 
     @Override
     public ArrayList<ColumnMeta> outputSchema() {
+        if (outputSchema == null) {
+            buildOutputSchema();
+        }
         return outputSchema;
     }
 

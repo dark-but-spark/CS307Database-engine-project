@@ -133,6 +133,9 @@ public class NestedLoopJoinOperator implements PhysicalOperator {
 
             if (rightIndex < rightTuples.size()) {
                 Tuple rightTuple = rightTuples.get(rightIndex++);
+                // Defense note: this operator produces the Cartesian candidate
+                // pair. ON/WHERE predicates are evaluated by FilterOperator so
+                // expression handling stays centralized in Tuple.eval_expr().
                 currentTuple = new JoinTuple(currentLeftTuple, rightTuple, tupleSchema);
                 readyForNext = true;
                 return true;

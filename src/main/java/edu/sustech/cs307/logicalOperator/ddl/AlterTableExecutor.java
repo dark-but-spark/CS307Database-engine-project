@@ -36,6 +36,9 @@ public class AlterTableExecutor implements DMLExecutor {
                     Logger.info("Added column {} {} to table {}", colName, dataType, tableName);
                 }
             } else if (op == AlterOperation.DROP) {
+                // 答辩检索-DROP_COLUMN-ChenJianye：ALTER TABLE DROP COLUMN 入口。
+                // 讲解点：解析出列名后交给 DBManager.dropColumn()，由 DBManager
+                // 负责重写记录文件和更新 TableMeta，保证非空表 schema 也一致。
                 String colName = expr.getColumnName();
                 if (colName != null) {
                     dbManager.dropColumn(tableName, colName);

@@ -41,10 +41,28 @@ SELECT id, name FROM students WHERE age = 18 OR gpa > 3.90;
 
 SELECT COUNT(*) FROM students;
 SELECT COUNT(id) FROM students WHERE gpa >= 3.50;
+SELECT COUNT(DISTINCT age) FROM students;
 SELECT MAX(gpa) FROM students;
 SELECT MIN(gpa) FROM students;
 SELECT age, COUNT(*) FROM students GROUP BY age;
 SELECT id, name, gpa FROM students ORDER BY gpa DESC;
+
+CREATE TABLE scores (student_id int, course char, score int);
+INSERT INTO scores (student_id, course, score) VALUES (1, 'database', 95);
+INSERT INTO scores (student_id, course, score) VALUES (2, 'database', 86);
+INSERT INTO scores (student_id, course, score) VALUES (3, 'database', 91);
+INSERT INTO scores (student_id, course, score) VALUES (8, 'database', 98);
+INSERT INTO scores (student_id, course, score) VALUES (30, 'database', 78);
+
+SELECT students.id, students.name, scores.score
+FROM students JOIN scores ON students.id = scores.student_id
+WHERE scores.score >= 90;
+
+SELECT id, name FROM students
+WHERE id IN (SELECT student_id FROM scores WHERE score >= 90);
+
+SELECT id, name FROM students
+WHERE EXISTS (SELECT student_id FROM scores WHERE scores.student_id = students.id AND score < 80);
 
 CREATE INDEX idx_students_id ON students (id);
 SELECT id, name, gpa FROM students WHERE id >= 10 AND id < 16;
@@ -66,3 +84,10 @@ COMMIT;
 SELECT id, name FROM students WHERE id <= 2;
 
 DROP INDEX idx_students_id;
+
+CREATE TABLE scratch (id int, tag char);
+INSERT INTO scratch (id, tag) VALUES (1, 'tmp');
+ALTER TABLE scratch ADD extra int;
+SELECT * FROM scratch;
+ALTER TABLE scratch DROP COLUMN extra;
+SHOW TABLES;

@@ -128,6 +128,9 @@ public class PhysicalPlanner {
                 continue;
             }
             IndexBounds candidate = new IndexBounds(predicate.columnName());
+            // Defense note: once a usable indexed column is found, merge all AND
+            // predicates on the same column into one tight range, e.g.
+            // id >= 10 AND id < 16 becomes a single IndexScanOperator range.
             for (Expression expression : conjuncts) {
                 IndexPredicate peer = parseIndexPredicate(tableName, expression);
                 if (peer != null && peer.columnName().equalsIgnoreCase(predicate.columnName())) {
@@ -275,6 +278,9 @@ public class PhysicalPlanner {
             if (predicate.equalValue() != null) {
                 this.equalValue = predicate.equalValue();
             }
+            // Choose the tightest lower and upper bounds so the index scan reads
+            // the smallest candidate RID range while FilterOperator preserves
+            // full SQL correctness above it.
             if (predicate.lowValue() != null && isTighterLow(predicate)) {
                 this.lowValue = predicate.lowValue();
                 this.lowInclusive = predicate.lowInclusive();

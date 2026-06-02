@@ -166,6 +166,9 @@ public class TableMeta {
     public void dropIndex(String indexName) throws DBException {
         // Task 3.1 Index Support - Metadata: persist DROP INDEX by removing both
         // the index type and its target column mapping.
+        // 答辩检索-DROP_INDEX-ChenJianye：表元数据层删除索引。
+        // 讲解点：indexes 保存索引类型，indexColumns 保存索引对应列；
+        // DROP INDEX 必须同时删除这两个映射，否则重启重建索引会读到脏元数据。
         if (!indexes.containsKey(indexName)) {
             throw new DBException(ExceptionTypes.InvalidSQL("DROP INDEX", "Index does not exist: " + indexName));
         }

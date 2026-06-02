@@ -40,6 +40,9 @@ public class MetaManager {
 
     public void dropTable(String tableName) throws DBException {
         // Task 2.1.1 Basic DDL - DROP TABLE: remove table metadata and persist it.
+        // 答辩检索-DROP_TABLE-chenjiyan：元数据层删除表。
+        // 讲解点：这里只负责从 tables 映射中移除表定义并写回 JSON；
+        // 物理目录删除由 DBManager.dropTable() 负责。
         if (!tables.containsKey(tableName)) {
             throw new DBException(ExceptionTypes.TableDoesNotExist(tableName));
         }

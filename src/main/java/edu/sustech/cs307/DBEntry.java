@@ -118,6 +118,9 @@ public class DBEntry {
         ArrayList<String> statements = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         boolean inSingleQuote = false;
+        // Defense note: the CLI accepts pasted multi-statement scripts. We split
+        // only on semicolons outside single-quoted strings so demo.SQL can be
+        // executed exactly as a batch without corrupting text literals.
         for (int i = 0; i < sql.length(); i++) {
             char ch = sql.charAt(i);
             if (ch == '\'') {

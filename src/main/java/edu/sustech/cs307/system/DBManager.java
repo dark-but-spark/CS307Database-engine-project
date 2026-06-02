@@ -118,6 +118,9 @@ public class DBManager {
     public void descTable(String table_name) throws DBException {
         // Task 2.1.1 Basic DDL - DESCRIBE TABLE: display column names and types
         // from table metadata.
+        // 答辩检索-DESCRIBE-chenjiyan：DESCRIBE 的核心逻辑。
+        // 讲解点：从 MetaManager 读取 TableMeta，遍历 columns_list，把列名和
+        // ValueType 以表格形式输出；这里不扫描数据页，只依赖元数据。
         TableMeta tableMeta = metaManager.getTable(table_name);
         Logger.info("|---------------|---------------|");
         Logger.info("|     Field     |     Type      |");
@@ -175,6 +178,9 @@ public class DBManager {
     public void dropIndex(String indexName) throws DBException {
         // Task 3.1 Index Support - DROP INDEX: remove the index definition and
         // discard its runtime B+Tree.
+        // 答辩检索-DROP_INDEX-ChenJianye：DROP INDEX 的核心逻辑。
+        // 讲解点：索引名全局查找所属表 -> 删除 TableMeta 中的索引定义 ->
+        // 删除 runtimeIndexes 中的内存 B+Tree -> 保存 meta JSON。
         for (String tableName : metaManager.getTableNames()) {
             TableMeta tableMeta = metaManager.getTable(tableName);
             if (tableMeta.getIndexes().containsKey(indexName)) {
@@ -506,6 +512,10 @@ public class DBManager {
      */
     public void dropTable(String table_name) throws DBException {
         // Task 2.1.1 Basic DDL - DROP TABLE: remove both table files and metadata.
+        // 答辩检索-DROP_TABLE-chenjiyan/ChenJianye：DROP TABLE 的底层能力。
+        // 讲解点：先检查表是否存在，再删除表目录中的物理文件，随后清理运行期索引
+        // 和 MetaManager 中的表元数据。注意：当前 LogicalPlanner 尚未把 SQL
+        // "DROP TABLE t" 接到这里，因此这是底层接口，不是完整 SQL 入口。
         if(!isTableExists(table_name)){
             throw new DBException(ExceptionTypes.BadIOError("Table does not exist"));
         }

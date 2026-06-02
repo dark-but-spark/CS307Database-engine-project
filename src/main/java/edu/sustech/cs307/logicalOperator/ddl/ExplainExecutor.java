@@ -24,6 +24,9 @@ public class ExplainExecutor implements DMLExecutor {
     public void execute() throws DBException {
        // Task 2.1.1 Basic DDL - EXPLAIN: print the logical plan generated for a
        // SELECT statement.
+       // 答辩检索-EXPLAIN-chenjiyan：ExplainExecutor 是 EXPLAIN 的核心执行器。
+       // 讲解顺序：检查 EXPLAIN 后是否带 SELECT -> 调用 LogicalPlanner.handleSelect()
+       // 生成逻辑计划树 -> 按行 Logger 输出树形结构。
        if(explainStatement.getStatement()==null){
            throw new DBException(ExceptionTypes.UnsupportedCommand(explainStatement.toString()));
        }

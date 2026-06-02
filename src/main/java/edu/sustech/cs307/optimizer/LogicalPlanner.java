@@ -116,6 +116,9 @@ public class LogicalPlanner {
             handleCreateIndex(dbManager, createIndexStmt);
             return null;
         } else if (stmt instanceof Drop dropStmt && "INDEX".equalsIgnoreCase(dropStmt.getType())) {
+            // 答辩检索-DROP_INDEX-ChenJianye：DROP INDEX 的 SQL 入口。
+            // 这里只负责识别 JSqlParser 解析出的 Drop Statement，真正删除索引元数据
+            // 和运行期 B+Tree 的逻辑在 DBManager.dropIndex()。
             dbManager.dropIndex(dropStmt.getName().getName());
             return null;
         } else if (stmt instanceof Alter alterStmt) {
@@ -134,9 +137,13 @@ public class LogicalPlanner {
             // a result-producing operator yet.
             // TODO(Task 2.1.1): Return EXPLAIN output as a result tuple instead
             // of logging directly from the executor.
+            // 答辩检索-EXPLAIN-chenjiyan/ChenJianye：EXPLAIN 的入口在这里，
+            // 由 ExplainExecutor 重新构造 SELECT 的逻辑计划并打印计划树。
             new ExplainExecutor(explainStatement, dbManager).execute();
             return null;
         } else if (stmt instanceof DescribeStatement describeStatement) {
+            // 答辩检索-DESCRIBE-chenjiyan/ChenJianye：DESCRIBE 的 SQL 入口。
+            // 入口层只取表名并转发；字段名和类型的展示在 DBManager.descTable()。
             dbManager.descTable(describeStatement.getTable().getName());
             return null;
         } else if (stmt instanceof ShowStatement showStatement) {

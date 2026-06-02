@@ -1,5 +1,27 @@
 # CS307 Database Engine 答辩流程与回答提纲
 
+## 速查索引（关键实现代码行号）
+
+| 模块 | 关键文件 | 行号 |
+|------|---------|------|
+| B+Tree split (InternalNode) | `BPlusTree.java` | :246 |
+| B+Tree split (LeafNode) | `BPlusTree.java` | :397 |
+| B+Tree 范围查询链表遍历 | `BPlusTree.java` | :361-383 |
+| B+Tree 删除下溢处理 | `BPlusTree.java` | :185-203 |
+| BPlusTreeIndex TreeSet 懒迭代 | `BPlusTreeIndex.java` | :204-235 |
+| 优化器索引选择 | `PhysicalPlanner.java` | :114-152 |
+| IndexScanOperator 建索引迭代器 | `IndexScanOperator.java` | :129-147 |
+| IndexScanOperator RID读记录 | `IndexScanOperator.java` | :164-179 |
+| BEGIN 快照设计 | `TransactionManager.java` | :81-93 |
+| COMMIT 物理/逻辑操作 | `TransactionManager.java` | :106-115 |
+| SAVEPOINT 创建 | `TransactionManager.java` | :150-156 |
+| ROLLBACK TO SAVEPOINT | `TransactionManager.java` | :169-178 |
+| restoreSnapshot 恢复逻辑 | `TransactionManager.java` | :242-252 |
+| 火山模型 Begin/Next/Close | `SeqScanOperator.java`, `FilterOperator.java` 等 | — |
+| LRU Victim/Pin/Unpin | `LRUReplacer.java` | — |
+
+---
+
 ## 1. 开场说明
 
 建议先用 1 分钟说明项目目标：
@@ -90,7 +112,7 @@ SQL 先被 JSqlParser 解析成 AST。`LogicalPlanner` 把 AST 转成逻辑算�
 
 我们把 JOIN 拆成两个步骤：先由 `NestedLoopJoinOperator` 枚举候选连接结果，再由 `FilterOperator` 判断 ON 条件。这样实现简单，能复用已有表达式求值逻辑。代价是大表 JOIN 会占较多内存和时间，后续可以改成 block nested-loop 或 hash join。
 
-### Index
+### Index (Task 3 — 10 points)
 
 回答重点：
 
@@ -104,7 +126,25 @@ SQL 先被 JSqlParser 解析成 AST。`LogicalPlanner` 把 AST 转成逻辑算�
 
 索引结构保存 `Value -> RID` 的映射。查询时 `PhysicalPlanner` 检查 WHERE 是否是可索引的单表谓词。如果命中索引列，就生成 `IndexScanOperator`，通过索引返回候选 RID，再按 RID 读取记录。为了保证语义正确，外层仍然执行完整 WHERE 过滤。
 
-### Transaction
+#### Task 3 Extended Q&A
+
+**Q: 分裂时 InternalNode 和 LeafNode 的分裂点为什么不同？**
+
+A: InternalNode 分裂后中间键**上移**到父节点（子节点不再保留），分裂点偏右（`keyNumber()/2+1`）。LeafNode 分裂后中间键**复制**到父节点（叶子保留），分裂点偏左（`(keyNumber()+1)/2`）。这是 B+Tree 标准语义——内部节点 key 是路由，叶子节点 key 是数据。
+
+**Q: 为什么索引层额外维护 TreeSet？**
+
+A: `BPlusTree.searchRange()` 返回物化的 `List<V>`，不适合火山模型的按需拉取。TreeSet 红黑树的 `headSet`/`tailSet`/`subSet` 是视图（不拷贝数据），`flatten()` 实现了懒迭代器——每次 `hasNext()` 才查 B+Tree 取下一个 key 的 RID bucket。当结果集很大时，避免一次性把所有 RID 装入内存。
+
+**Q: 索引扫描后为什么还要 FilterOperator？**
+
+A: 因为索引只吸收一部分条件。例如 `WHERE id >= 10 AND name = 'alice'` 可能只用 id 索引（第一个命中索引的列），name 条件仍需判断。保留 FilterOperator 保证语义正确，避免 residual predicate 漏判。
+
+**Q: B+Tree 删除时下溢了如何处理？**
+
+A: 三步走：先 merge 兄弟节点（合并 keys+values+children）→ 如果 merge 后溢出则 split 再分裂 → 从父节点 deleteChild 移除不再需要的索引项。逐层回溯到根。如果根 keys 变为 0，降树高。
+
+### Transaction (Task 4 — 8 points, 必问 Q&A)
 
 回答重点：
 
@@ -117,6 +157,44 @@ SQL 先被 JSqlParser 解析成 AST。`LogicalPlanner` 把 AST 转成逻辑算�
 可以这样答：
 
 事务实现采用快照方案。开始事务前先把当前状态刷盘，然后复制数据库目录。回滚时清空当前目录并把快照复制回来，同时恢复 DiskManager 的 `filePages`。这种方式实现直接，适合课程项目展示事务语义；如果要扩展到真实数据库，应改成 undo/redo log 和 WAL。
+
+#### Task 4 必问三个问题（回答错则 Task 4 全部 8 分不得分）
+
+**Q1: Explain how to design snapshot in begin command.**
+
+**标准回答**：
+1. `persistRuntimeState()` 将 BufferPool 所有脏页写回磁盘，确保当前数据一致性。
+2. `Files.createTempDirectory("cs307-txn-")` 在系统临时目录创建快照根目录。
+3. `copyDirectoryContents(dbRoot, snapshotDir)` 递归复制整个 `CS307-DB/` 目录，包括所有表的数据文件、元数据 JSON、`disk_manager_meta.json`。
+4. `transactionFilePages = new HashMap<>(diskManager.filePages)` 保存每个数据文件的当前页数快照（`{tablename: pageCount}`）。
+5. `savepoints.clear()` 重置保存点列表。
+- 为什么不是 WAL：课程项目范围，目录快照实现简单；缺点是复制大数据库慢，且不支持并发。
+- 代码位置：`TransactionManager.java:81-93`
+
+**Q2: Explain if executing commit command, what happens in physical and logical structure.**
+
+**标准回答**：
+- **物理层**：
+  - 数据已实时落盘（本项目每次 INSERT/UPDATE/DELETE 都直接写磁盘），COMMIT 无需再写数据。
+  - `persistRuntimeState()` 再次刷盘，保证 BufferPool 中缓存修改也持久化。
+  - `cleanupSnapshot(transactionSnapshot)` 删除事务快照临时目录，释放磁盘空间。
+  - `cleanupSavepoints()` 逐个删除所有保存点快照目录。
+- **逻辑层**：
+  - `transactionSnapshot = null` — 事务标记结束。
+  - `transactionFilePages = null` — 释放页数快照引用。
+  - 后续 SQL 操作不再受事务保护（不能 ROLLBACK）。
+- 事务外执行 COMMIT 是 no-op（直接 return），不会报错。
+- 代码位置：`TransactionManager.java:106-115`
+
+**Q3: Explain your design of savepoint and rollback.**
+
+**标准回答**：
+- **SAVEPOINT**：`savepoint(String name)` 每次调用创建一个完整目录快照 + filePages 快照，追加到 `List<SavepointSnapshot>`。同名 SAVEPOINT 采用**栈语义**：不覆盖旧的，追加到列表末尾。`findLatestSavepoint()` 从栈尾向前搜索，因此最近同名保存点生效。
+- **ROLLBACK TO SAVEPOINT**：`rollbackToSavepoint(name)` → 找到最近匹配保存点 → `restoreSnapshot()` 恢复目录和 filePages → `cleanupSavepointsAfter(index)` 清除该保存点**之后**的所有保存点。**目标保存点保留**（可多次回滚到同一保存点）。
+- **ROLLBACK（全事务）**：恢复到 BEGIN 时的快照，清理所有保存点。
+- **RELEASE SAVEPOINT**：只删除快照目录和记录，不影响数据。释放后不能回滚到该保存点。
+- **恢复机制**：`restoreSnapshot()` = `DiscardAllPages()` 丢 BufferPool → `deleteDirectoryContents()` 清空数据目录 → `copyDirectoryContents()` 从快照复制回 → 恢复 `filePages` 元数据。
+- 代码位置：`TransactionManager.java:140-195`（savepoint/rollbackTo/release），`TransactionManager.java:242-252`（restoreSnapshot）
 
 ## 4. 常见追问
 

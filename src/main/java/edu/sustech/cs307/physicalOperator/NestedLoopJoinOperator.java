@@ -11,6 +11,48 @@ import edu.sustech.cs307.tuple.JoinTuple;
 import edu.sustech.cs307.tuple.Tuple;
 import net.sf.jsqlparser.expression.Expression;
 
+/**
+ * 嵌套循环连接（Nested-Loop Join）物理算子 — Task 2.2 Advanced（必问 Q&A，答错 = 0 分）。
+ *
+ * <h3>算法原理（答辩可逐条说明）</h3>
+ * <ol>
+ *   <li>左输入（outer）：逐行扫描，每行与右表所有行组合</li>
+ *   <li>右输入（inner）：Begin() 中完全物化到内存（List&lt;Tuple&gt;）
+ *       — 避免每行左输入都重新打开右算子（N+1 次 Begin/Close）</li>
+ *   <li>对每对 (leftTuple, rightTuple) 创建 JoinTuple（Cartesian 候选对）</li>
+ *   <li>ON 条件由外层 FilterOperator 判断，本算子只负责生成候选对</li>
+ * </ol>
+ *
+ * <h3>为什么 ON 条件不在这里判断？（答辩高频追问）</h3>
+ * PhysicalPlanner.handleJoin() 将 FilterOperator 包在 NestedLoopJoinOperator 之上：
+ * <pre>
+ * FilterOperator(NestedLoopJoinOperator(left, right), joinExprs)
+ * </pre>
+ * 这样：
+ * <ul>
+ *   <li>表达式求值统一走 Tuple.eval_expr()，避免分散在多个算子中实现</li>
+ *   <li>JOIN 的 ON 条件与 WHERE 条件复用同一套 FilterOperator 逻辑</li>
+ * </ul>
+ *
+ * <h3>性能特性</h3>
+ * <ul>
+ *   <li>时间复杂度：O(m × n)，m=左表行数，n=右表行数</li>
+ *   <li>空间复杂度：O(n)，右表完全物化在内存</li>
+ *   <li>优化方向：block nested-loop（分块处理右表）、hash join（右表建哈希表）</li>
+ * </ul>
+ *
+ * <h3>火山模型实现</h3>
+ * findNext() 维护状态机：
+ * <ul>
+ *   <li>currentLeftTuple == null → 从 leftOperator 取下一行</li>
+ *   <li>rightIndex < rightTuples.size() → 取下一个右表元组做笛卡尔积</li>
+ *   <li>rightIndex 耗尽 → currentLeftTuple = null，回到外层循环</li>
+ * </ul>
+ *
+ * <h3>JoinTuple 合并</h3>
+ * 输出 schema = leftOperator.outputSchema() + rightOperator.outputSchema()。
+ * 列名前缀来自原始表名，上层算子通过 TabCol(tableName, columnName) 解析。
+ */
 public class NestedLoopJoinOperator implements PhysicalOperator {
 
     private final PhysicalOperator leftOperator;

@@ -16,12 +16,31 @@ import java.util.Map;
 import org.pmw.tinylog.Logger;
 
 /**
- * 磁盘管理器类，用于管理文件的读写和元数据的存储。
- * 提供创建文件、读取页面、写入页面、分配页面和删除文件等功能。
- * 
- * <p>
- * 该类支持从磁盘读取和写入文件，并维护文件的页面信息。
- * </p>
+ * 磁盘管理器 — Task 1 存储管理底层。
+ *
+ * <h3>核心职责（答辩可答）</h3>
+ * <ul>
+ *   <li>页级文件 I/O：ReadPage / WritePage / FlushPage / AllocatePage</li>
+ *   <li>文件管理：CreateFile / DeleteFile，每个表对应一个数据文件</li>
+ *   <li>元数据持久化：filePages（Map&lt;filename, pageCount&gt;）记录每个文件分配了多少页，
+ *       持久化到 disk_manager_meta.json</li>
+ * </ul>
+ *
+ * <h3>页面分配（AllocatePage）</h3>
+ * 每次分配返回下一个可用页号（filePages[filename]++），页号从 0 开始递增。
+ * 页的实际磁盘偏移 = pageId * DEFAULT_PAGE_SIZE (4096 bytes)。
+ *
+ * <h3>filePages 的作用（答辩追问）</h3>
+ * filePages 记录每个数据文件已分配的页数：
+ * <ul>
+ *   <li>读取时：知道文件有多少页 → SeqScan 知道遍历边界</li>
+ *   <li>分配时：每次 NewPage 递增对应的 filePages[filename]</li>
+ *   <li>事务 ROLLBACK 时：必须恢复到 BEGIN 时的 filePages 快照，否则页数错乱</li>
+ * </ul>
+ *
+ * <h3>I/O 模型</h3>
+ * 使用 java.nio.channels.FileChannel 做随机读写，每次操作一个 Page（4096 字节）。
+ * ReadPage/WritePage 从指定 filename + offset 位置读写完整 Page。
  */
 public class DiskManager {
     private final String currentDir;

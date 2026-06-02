@@ -9,6 +9,32 @@ import java.util.Collection;
 import edu.sustech.cs307.exception.DBException;
 import org.pmw.tinylog.Logger;
 
+/**
+ * 过滤（WHERE）物理算子 — Task 2.1.2（答辩可问）。
+ *
+ * <h3>火山模型执行流程</h3>
+ * 遵循典型的火山模型 readyForNext 模式：
+ * <ol>
+ *   <li>hasNext() → 调用 findNext() 搜索下一个满足 WHERE 条件的元组</li>
+ *   <li>findNext() → 循环从 child 取元组，调用 tuple.eval_expr(whereExpr) 判断</li>
+ *   <li>Next() → 消费已准备好的元组，置 readyForNext=false</li>
+ * </ol>
+ *
+ * <h3>表达式求值（eval_expr）</h3>
+ * whereExpr 是 JSqlParser 表达式树（支持 AND/OR/= /&gt;/&lt;/&gt;=/&lt;= 等）。
+ * Tuple.eval_expr() 递归遍历表达式树求值，返回 Boolean。
+ * 例如：{@code WHERE age > 18 AND name = 'alice'} 被解析为
+ * AndExpression(GreaterThan(age, 18), EqualsTo(name, 'alice'))。
+ *
+ * <h3>为什么索引扫描后仍保留 FilterOperator？（答辩高频追问）</h3>
+ * PhysicalPlanner 生成 {@code FilterOperator(IndexScanOperator, whereExpr)} 而非
+ * 直接用 IndexScanOperator。因为：
+ * <ul>
+ *   <li>索引可能只吸收部分 WHERE 条件（如只用 id 索引，name 条件未吸收）</li>
+ *   <li>FilterOperator 保证完整 WHERE 语义，避免 residual predicate 漏判</li>
+ *   <li>即使索引已完全覆盖所有条件，FilterOperator 也只多一次 eval 调用，无副作用</li>
+ * </ul>
+ */
 public class FilterOperator implements PhysicalOperator {
     private PhysicalOperator child;
     private Expression whereExpr;

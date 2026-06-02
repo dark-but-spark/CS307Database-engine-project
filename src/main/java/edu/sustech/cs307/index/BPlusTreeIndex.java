@@ -13,22 +13,37 @@ import java.util.NoSuchElementException;
 import java.util.TreeSet;
 
 /**
- * 基于 B+Tree 的内存索引 — Q&A 必问（Task 3 Index 10 分）。
+ * 基于 B+Tree 的内存索引 — Task 3 Index (10 分) Q&A 必问。
  *
- * 整体设计：
- * - 底层使用导入的 BPlusTree<K, V> 泛型实现（com.jgfanng.algo）
- * - Key:   ValueIndexKey（包装 Value，实现 Comparable 接口支持排序比较）
- * - Value: List<RID>（同一键值可能对应多行，用 RID 列表存储）
- * - 额外维护 TreeSet<ValueIndexKey> 用于范围查询（headSet/tailSet/subSet）
+ * <h3>整体设计</h3>
+ * <ul>
+ *   <li>底层：BPlusTree&lt;ValueIndexKey, List&lt;RID&gt;&gt;（com.jgfanng.algo 的泛型 B+Tree）</li>
+ *   <li>Key：ValueIndexKey — 包装 Value 并实现 Comparable，支持 int/float/char 跨类型排序比较</li>
+ *   <li>Value：List&lt;RID&gt; — 同键值可能对应多行（非唯一索引），用 RID 列表存储</li>
+ *   <li>额外维护 TreeSet&lt;ValueIndexKey&gt; 用于范围查询（headSet/tailSet/subSet）</li>
+ * </ul>
  *
- * 为什么不直接用 BPlusTree 的范围查询？
- * BPlusTree 不支持原生的范围遍历。TreeSet 是红黑树，支持 O(log n) 的范围定位。
- * 索引维护时同步更新 TreeSet。
+ * <h3>为什么额外维护 TreeSet？（答辩高频追问）</h3>
+ * <ol>
+ *   <li>BPlusTree.searchRange() 返回 List&lt;V&gt;（物化结果），一次性把所有匹配值装入内存。
+ *       如果范围很大会 OOM，且不符合火山模型（按需拉取）。</li>
+ *   <li>索引层需要 Iterator&lt;Entry&lt;Value, RID&gt;&gt;（懒迭代器）。
+ *       红黑树的 headSet/tailSet/subSet 是 SortedSet 视图，不拷贝数据。</li>
+ *   <li>flatten() 遍历 TreeSet view 时按需调用 tree.search() 取 RID bucket，
+ *       每个 key 只在实际被消费时才从 B+Tree 查询。</li>
+ * </ol>
  *
- * 索引的动态维护（增删改）：
- * - INSERT 行 → insert(value, rid)：查找 bucket，追加 RID，插回 B+Tree
- * - DELETE 行 → delete(value, rid)：从 bucket 中移除该 RID；bucket 为空则删除整个 key
- * - UPDATE 行 → delete(oldValue, rid) + insert(newValue, rid)
+ * <h3>RID bucket 并发语义</h3>
+ * <ul>
+ *   <li>insert(value, rid)：先 tree.search(key) 取 bucket → 追加 RID → tree.insert(key, bucket) 覆盖</li>
+ *   <li>delete(value, rid)：从 bucket 中 removeIf → bucket 空则 tree.delete(key) + TreeSet.remove(key)</li>
+ *   <li>RID 复制使用 new RID(rid) 避免引用泄漏</li>
+ * </ul>
+ *
+ * <h3>索引动态维护</h3>
+ * INSERT 行 → BPlusTreeIndex.insert(value, rid)
+ * DELETE 行 → BPlusTreeIndex.delete(value, rid)
+ * UPDATE 行 → delete(oldValue, rid) + insert(newValue, rid)
  */
 public class BPlusTreeIndex implements Index {
     /** B+Tree 的分支因子，影响树的高度和节点容量 */
@@ -199,7 +214,18 @@ public class BPlusTreeIndex implements Index {
 
     /**
      * 展平：把多个 key 的 RID bucket 合并为 (Value, RID) 对的有序懒迭代器。
-     * 因为 TreeSet 遍历是有序的，所以输出的 (Value, RID) 对也是按 key 排序的。
+     * 
+     * <h3>实现要点（答辩可答）</h3>
+     * <ul>
+     *   <li>TreeSet 遍历顺序即 key 排序顺序 → 输出 (Value, RID) 按 key 有序</li>
+     *   <li>懒求值：每次 hasNext() 才推进到下一个有效 RID，不提前物化</li>
+     *   <li>跨 key 切换：当前 bucket 耗尽时，从 keyIterator 取下一个 key，
+     *       通过 tree.search() 查询该 key 的 RID bucket</li>
+     *   <li>空 bucket 安全：bucket 为 null 时视为空列表，自动跳到下一个 key</li>
+     * </ul>
+     * 
+     * @param orderedKeys 有序 key 迭代器（来自 TreeSet 的 view）
+     * @return (Value, RID) 对的懒迭代器
      */
     private Iterator<Entry<Value, RID>> flatten(Iterable<ValueIndexKey> orderedKeys) {
         return new Iterator<>() {

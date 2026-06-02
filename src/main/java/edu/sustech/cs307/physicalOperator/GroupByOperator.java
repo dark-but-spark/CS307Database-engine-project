@@ -17,6 +17,53 @@ import net.sf.jsqlparser.statement.select.SelectItem;
 
 import java.util.*;
 
+/**
+ * GROUP BY 物理算子 — Task 2.2 Advanced（必问 Q&A，答错 = 0 分）。
+ *
+ * <h3>SQL → 执行流程（答辩可答）</h3>
+ * <ol>
+ *   <li>LogicalPlanner.handleSelect() 检测到 {@code plainSelect.getGroupBy() != null}
+ *       → 创建 LogicalGroupByOperator（在 COUNT/MAX/MIN 短路检测之后）</li>
+ *   <li>PhysicalPlanner.handleGroupBy() → 生成 GroupByOperator（子算子 + groupByElement + selectItems）</li>
+ *   <li>Begin() 物化所有子算子行到内存 → 按 GROUP BY 列分组 → 计算聚合函数</li>
+ * </ol>
+ *
+ * <h3>核心实现（Begin() 方法）</h3>
+ * <ol>
+ *   <li>调用 child.Begin() 拉取所有行</li>
+ *   <li>{@code LinkedHashMap<String, List<Tuple>>} 按分组键分组（保持插入顺序）</li>
+ *   <li>分组键：GROUP BY 列值以 {@code |} 分隔的字符串拼接</li>
+ *   <li>逐组调用 {@code computeAggregate()} 计算 count/max/min</li>
+ *   <li>{@code buildResultTuple()} 按 SELECT 项顺序组装输出行</li>
+ * </ol>
+ *
+ * <h3>支持的聚合函数</h3>
+ * <ul>
+ *   <li>COUNT(*) — 统计组内行数</li>
+ *   <li>COUNT(col) — 统计组内非空列值</li>
+ *   <li>MAX(col) — 组内最大值（O(n) 单遍扫描）</li>
+ *   <li>MIN(col) — 组内最小值（O(n) 单遍扫描）</li>
+ * </ul>
+ *
+ * <h3>SELECT 列表处理</h3>
+ * SELECT 项可以是：
+ * <ul>
+ *   <li>聚合函数（Function）→ 输出聚合结果值</li>
+ *   <li>GROUP BY 列（Column）→ 输出该组的分组键值</li>
+ *   <li>{@code *}（AllColumns）→ 输出所有分组键值</li>
+ * </ul>
+ *
+ * <h3>当前限制（TODO）</h3>
+ * <ul>
+ *   <li>仅支持单个聚合函数（parseAggregate 取第一个 Function 即 return）</li>
+ *   <li>不支持 HAVING 子句过滤</li>
+ *   <li>Begin() 中物化所有子算子行到内存（非流式/哈希聚合）</li>
+ *   <li>分组键使用字符串拼接（非类型化复合键）</li>
+ * </ul>
+ *
+ * @see LogicalPlanner#handleSelect 逻辑计划中的 GROUP BY 检测
+ * @see PhysicalPlanner#handleGroupBy 物理计划生成
+ */
 public class GroupByOperator implements PhysicalOperator {
     private final PhysicalOperator child;
     private final List<TabCol> groupByCols;

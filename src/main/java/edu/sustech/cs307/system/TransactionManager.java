@@ -116,14 +116,23 @@ public class TransactionManager {
 
 
     /**
-     * ROLLBACK — 回滚整个事务。
+     * ROLLBACK — 回滚整个事务到 BEGIN 时的状态。
      *
-     * 执行步骤：
-     * 1. DiscardAllPages() — 丢弃 BufferPool 中所有脏页（它们可能包含未提交的修改）
-     * 2. deleteDirectoryContents(dbRoot) — 删除当前数据库目录内容
-     * 3. copyDirectoryContents(snapshot, dbRoot) — 从快照恢复 BEGIN 时的数据
-     * 4. 恢复 filePages 元数据
-     * 5. 清理所有 savepoints 和快照目录
+     * <h3>执行步骤（答辩需逐条说明）</h3>
+     * <ol>
+     *   <li>DiscardAllPages() — 丢弃 BufferPool 中所有缓存的页面（包括脏页）。
+     *       这些页面可能包含 BEGIN 之后的未提交修改，直接丢弃而非刷盘。</li>
+     *   <li>deleteDirectoryContents(dbRoot) — 删除当前 CS307-DB/ 目录下所有数据文件。</li>
+     *   <li>copyDirectoryContents(snapshot, dbRoot) — 从 BEGIN 时保存的快照目录
+     *       完整恢复所有数据文件和元数据。</li>
+     *   <li>恢复 filePages 元数据 — DiskManager.filePages 记录每个文件的页数，
+     *       回滚后必须恢复为 BEGIN 时的值，否则后续读写会 offset 错乱。</li>
+     *   <li>cleanupSavepoints() — 删除所有保存点快照目录，清空保存点列表。</li>
+     *   <li>cleanupSnapshot(transactionSnapshot) — 删除事务级快照目录。</li>
+     * </ol>
+     *
+     * 为什么 DiscardAllPages 而不是 Flush？因为我们要丢弃未提交的修改，不能把它们写回磁盘。
+     * 刷盘会使未提交数据永久化，这违背了 ROLLBACK 的语义。
      */
     public void rollback() throws DBException {
         if (transactionSnapshot == null) {
@@ -195,7 +204,13 @@ public class TransactionManager {
     }
 
     /**
-     * 创建快照：先刷盘 → 创建临时目录 → 复制整个数据库目录。
+     * 创建快照：先刷盘确保数据一致性，再创建临时目录并完整复制数据库文件树。
+     * 
+     * <h3>为什么先 persistRuntimeState？</h3>
+     * BufferPool 中的脏页可能尚未写回磁盘。如果不先刷盘，
+     * 快照会缺失这些内存中的修改 → 回滚时无法恢复完整状态。
+     * 
+     * @return 临时目录路径，包含整个 CS307-DB/ 的完整副本
      */
     private Path createSnapshot() throws DBException {
         dbManager.persistRuntimeState();

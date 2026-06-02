@@ -10,6 +10,32 @@ import edu.sustech.cs307.meta.TabCol;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 投影（SELECT 列选择）物理算子 — Task 2.1.2（答辩可问）。
+ *
+ * <h3>核心功能</h3>
+ * 从子算子输出的完整行中选取指定的列子集，生成 ProjectTuple。
+ *
+ * <h3>SELECT * 解析（答辩细节）</h3>
+ * resolveOutputSchema() 处理：
+ * <ul>
+ *   <li>{@code SELECT *}：展开为用户请求的所有列（TabCol(tablename, colName)）→ 映射到 child schema</li>
+ *   <li>{@code SELECT col1, col2}：按列名 + 表名限定符匹配 child schema 中的列</li>
+ *   <li>多表同名列不写表名限定符 → 抛出 AmbiguousColumnName（防止歧义）</li>
+ * </ul>
+ *
+ * <h3>ProjectTuple</h3>
+ * ProjectTuple 是原 Tuple 的视图（不拷贝数据），通过索引映射访问底层值：
+ * {@code values[i] = originalTuple.getValue(resolvedTabCols[i])}。
+ * 这样避免了数据复制，O(#projected_columns) 访问开销。
+ *
+ * <h3>在计划树中的位置</h3>
+ * LogicalPlanner 将 Project 放在计划树最顶层：
+ * <pre>
+ * ProjectOperator(columns=[t.id, t.name])
+ *   └── ... (Filter / Join / SeqScan)
+ * </pre>
+ */
 public class ProjectOperator implements PhysicalOperator {
     private PhysicalOperator child;
     private List<TabCol> outputSchema; // Use bounded wildcard

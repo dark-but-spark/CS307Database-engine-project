@@ -163,7 +163,23 @@ public class BPlusTreeIndex implements Index {
         return flatten(keys);
     }
 
-    /** 打印 B+Tree 索引内容，用于调试和演示。 */
+    /** 打印 B+Tree 树形结构（内部节点 + 叶子节点），用于演示。 */
+    public String printTreeStructure() {
+        StringBuilder builder = new StringBuilder();
+        builder.append("B+Tree[")
+                .append(tableName)
+                .append(".")
+                .append(indexName)
+                .append(" on ")
+                .append(columnName)
+                .append("] branchingFactor=")
+                .append(BRANCHING_FACTOR)
+                .append('\n');
+        builder.append(tree.toString());
+        return builder.toString();
+    }
+
+    /** 打印 B+Tree 索引内容（叶子层平铺），用于调试和演示。 */
     public String printTree() {
         StringBuilder builder = new StringBuilder();
         builder.append("B+Tree[")

@@ -115,6 +115,18 @@ public class DBManager {
         // of formatting directly in DBManager.
     }
 
+    public void showIndex(String indexName) throws DBException {
+        for (String tableName : metaManager.getTableNames()) {
+            TableMeta tableMeta = metaManager.getTable(tableName);
+            if (tableMeta.getIndexes().containsKey(indexName)) {
+                BPlusTreeIndex index = getIndex(tableName, indexName);
+                Logger.info(index.printTreeStructure());
+                return;
+            }
+        }
+        throw new DBException(ExceptionTypes.InvalidSQL("SHOW INDEX", "Index does not exist: " + indexName));
+    }
+
     public void descTable(String table_name) throws DBException {
         // Task 2.1.1 Basic DDL - DESCRIBE TABLE: display column names and types
         // from table metadata.
@@ -172,7 +184,7 @@ public class DBManager {
         tableMeta.addIndex(indexName, columnName, TableMeta.IndexType.BTREE);
         BPlusTreeIndex index = rebuildIndex(tableName, indexName);
         metaManager.saveToJson();
-        Logger.info(index.printTree());
+        Logger.info(index.printTreeStructure());
     }
 
     public void dropIndex(String indexName) throws DBException {

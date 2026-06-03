@@ -74,6 +74,7 @@ public class LogicalPlanner {
     private static final Pattern RELEASE_SAVEPOINT_PATTERN =
             Pattern.compile("(?i)^RELEASE(?:\\s+SAVEPOINT)?\\s+([A-Za-z_][A-Za-z0-9_]*)$");
     private static final Pattern SHOW_TABLES_PATTERN = Pattern.compile("(?i)^SHOW\\s+TABLES$");
+    private static final Pattern SHOW_INDEX_PATTERN = Pattern.compile("(?i)^SHOW\\s+INDEX\\s+(\\S+)$");
 
     /**
      * 主入口：SQL → LogicalOperator 树。
@@ -350,6 +351,11 @@ public class LogicalPlanner {
         String normalizedSql = normalizeSql(sql);
         if (SHOW_TABLES_PATTERN.matcher(normalizedSql).matches()) {
             dbManager.showTables();
+            return true;
+        }
+        Matcher showIndexMatcher = SHOW_INDEX_PATTERN.matcher(normalizedSql);
+        if (showIndexMatcher.matches()) {
+            dbManager.showIndex(showIndexMatcher.group(1));
             return true;
         }
         if (BEGIN_PATTERN.matcher(normalizedSql).matches() || START_TRANSACTION_PATTERN.matcher(normalizedSql).matches()) {

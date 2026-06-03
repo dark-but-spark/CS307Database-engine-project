@@ -8,40 +8,48 @@ import java.util.Map;
 /**
  * Clock（时钟）页面替换器 — Task 1.2（10 分）。
  *
- * <h3>算法原理（答辩可答）</h3>
+ * 算法原理（答辩可答）:
+ *
+ *
  * Clock 替换算法是 LRU 的近似实现，又称为"第二次机会"（Second-Chance）算法。
  * 使用循环缓冲区 + 时钟指针，每个 frame 维护两个标志位：
- * <ul>
- *   <li>{@code evictable}：frame 是否可淘汰（Pin 设为 false，Unpin 设为 true）</li>
- *   <li>{@code referenced}：最近是否被访问（Pin 设为 true，Victim 扫描时清除）</li>
- * </ul>
+ * 
+ *   <li>evictable：frame 是否可淘汰（Pin 设为 false，Unpin 设为 true）
+ *   <li>referenced：最近是否被访问（Pin 设为 true，Victim 扫描时清除）
+ * 
  *
- * <h3>核心操作</h3>
- * <ul>
+ * 核心操作:
+ *
+ *
+ * 
  *   <li><b>Victim()</b>：从 clockHand 开始顺时针扫描，找第一个可淘汰 frame。
- *       <ol>
- *         <li>遇到非 evictable frame（被 Pin 的）→ 跳过，clockHand++</li>
+ *       
+ *         <li>遇到非 evictable frame（被 Pin 的）→ 跳过，clockHand++
  *         <li>遇到 referenced=true 的 evictable frame → 给予"第二次机会"：
- *             referenced 设为 false，clockHand++（下次扫描到它时可淘汰）</li>
- *         <li>遇到 referenced=false 的 evictable frame → 选中为 victim，从 frames 中移除</li>
- *       </ol>
+ *             referenced 设为 false，clockHand++（下次扫描到它时可淘汰）
+ *         <li>遇到 referenced=false 的 evictable frame → 选中为 victim，从 frames 中移除
+ *       
  *       <b>为什么 maxScans = frames.size() * 2？</b>
  *       最多两圈：第一圈把所有 evictable 的 referenced 清零，第二圈就能找到 victim。
- *       如果两圈后仍找不到 → 返回 -1（所有 frame 都被 pin 住了）。</li>
+ *       如果两圈后仍找不到 → 返回 -1（所有 frame 都被 pin 住了）。
  *   <li><b>Pin(frameId)</b>：已存在的 frame → 设为不可淘汰 + 刷新 referenced=true；
- *       新 frame → 检查容量后创建 FrameState 并加入列表（保持插入顺序）</li>
+ *       新 frame → 检查容量后创建 FrameState 并加入列表（保持插入顺序）
  *   <li><b>Unpin(frameId)</b>：将 pinned frame 标记为可淘汰（evictable=true）。
- *       frame 不存在或已可淘汰 → 抛异常。</li>
- * </ul>
+ *       frame 不存在或已可淘汰 → 抛异常。
+ * 
  *
- * <h3>Clock vs LRU（答辩对比题）</h3>
- * <ul>
- *   <li>Clock：O(1) 近似 LRU，不需要维护链表顺序，适合操作系统页面替换</li>
- *   <li>LRU：精确但需要维护访问顺序（链表），每次访问都要移动节点</li>
- *   <li>Clock 的"第二次机会"机制：频繁访问的页面 referenced 被反复置 true，不易被淘汰</li>
- * </ul>
+ * Clock vs LRU（答辩对比题）:
  *
- * <h3>插入顺序</h3>
+ *
+ * 
+ *   <li>Clock：O(1) 近似 LRU，不需要维护链表顺序，适合操作系统页面替换
+ *   <li>LRU：精确但需要维护访问顺序（链表），每次访问都要移动节点
+ *   <li>Clock 的"第二次机会"机制：频繁访问的页面 referenced 被反复置 true，不易被淘汰
+ * 
+ *
+ * 插入顺序:
+ *
+ *
  * frames 按 Pin 顺序追加（非 LRU 顺序），clockHand 按物理位置扫描。
  * 这意味着访问频率比访问顺序对 Clock 的影响更大。
  */

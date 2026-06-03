@@ -18,51 +18,38 @@ import net.sf.jsqlparser.statement.select.SelectItem;
 import java.util.*;
 
 /**
- * GROUP BY 物理算子 — Task 2.2 Advanced（必问 Q&A，答错 = 0 分）。
+ * GROUP BY 聚合算子 — Task 2 Advanced。
  *
- * <h3>SQL → 执行流程（答辩可答）</h3>
- * <ol>
- *   <li>LogicalPlanner.handleSelect() 检测到 {@code plainSelect.getGroupBy() != null}
- *       → 创建 LogicalGroupByOperator（在 COUNT/MAX/MIN 短路检测之后）</li>
- *   <li>PhysicalPlanner.handleGroupBy() → 生成 GroupByOperator（子算子 + groupByElement + selectItems）</li>
- *   <li>Begin() 物化所有子算子行到内存 → 按 GROUP BY 列分组 → 计算聚合函数</li>
- * </ol>
+ * SELECT dept, COUNT(*) FROM emp GROUP BY dept
  *
- * <h3>核心实现（Begin() 方法）</h3>
- * <ol>
- *   <li>调用 child.Begin() 拉取所有行</li>
- *   <li>{@code LinkedHashMap<String, List<Tuple>>} 按分组键分组（保持插入顺序）</li>
- *   <li>分组键：GROUP BY 列值以 {@code |} 分隔的字符串拼接</li>
- *   <li>逐组调用 {@code computeAggregate()} 计算 count/max/min</li>
- *   <li>{@code buildResultTuple()} 按 SELECT 项顺序组装输出行</li>
- * </ol>
+ * 整体算法：分桶 + 聚合
+ * 1. 遍历子算子的所有行
+ * 2. 按 GROUP BY 列的值构建分组键（如 "Engineering|"）
+ * 3. 将每行放入对应分组的桶中（LinkedHashMap<String, List<Tuple>>）
+ * 4. 遍历每个桶，对桶内行执行聚合函数（COUNT/MAX/MIN/SUM/AVG）
+ * 5. 每组输出一行：分组列值 + 聚合结果
  *
- * <h3>支持的聚合函数</h3>
- * <ul>
- *   <li>COUNT(*) — 统计组内行数</li>
- *   <li>COUNT(col) — 统计组内非空列值</li>
- *   <li>MAX(col) — 组内最大值（O(n) 单遍扫描）</li>
- *   <li>MIN(col) — 组内最小值（O(n) 单遍扫描）</li>
- * </ul>
+ * 执行流程：
+ *   LogicalPlanner.handleSelect() 检测 plainSelect.getGroupBy() != null
+ *   → 创建 LogicalGroupByOperator（在 COUNT/MAX/MIN 短路检测之后）
+ *   → PhysicalPlanner.handleGroupBy() 生成 GroupByOperator
+ *   → Begin() 物化所有行到内存，按组聚合
  *
- * <h3>SELECT 列表处理</h3>
- * SELECT 项可以是：
- * <ul>
- *   <li>聚合函数（Function）→ 输出聚合结果值</li>
- *   <li>GROUP BY 列（Column）→ 输出该组的分组键值</li>
- *   <li>{@code *}（AllColumns）→ 输出所有分组键值</li>
- * </ul>
+ * 分组键设计：
+ * 多列 GROUP BY 的键是管道分隔字符串（如 "a_val|b_val|"），NULL 表示为 "NULL"。
  *
- * <h3>当前限制（TODO）</h3>
- * <ul>
- *   <li>仅支持单个聚合函数（parseAggregate 取第一个 Function 即 return）</li>
- *   <li>不支持 HAVING 子句过滤</li>
- *   <li>Begin() 中物化所有子算子行到内存（非流式/哈希聚合）</li>
- *   <li>分组键使用字符串拼接（非类型化复合键）</li>
- * </ul>
+ * 支持的聚合函数：COUNT(*)/COUNT(col)/MAX/MIN/SUM/AVG
  *
- * @see LogicalPlanner#handleSelect 逻辑计划中的 GROUP BY 检测
- * @see PhysicalPlanner#handleGroupBy 物理计划生成
+ * SELECT 列表处理：
+ * - 聚合函数（Function）→ 输出聚合结果值
+ * - GROUP BY 列（Column）→ 输出该组的分组键值
+ * - *（AllColumns）→ 输出所有分组键值
+ *
+ * 当前限制：
+ * - 仅支持单个聚合函数（parseAggregate 取第一个 Function 即 return）
+ * - 不支持 HAVING 子句过滤
+ * - 全部数据需加载到内存，大数据集可能 OOM
+ * - 分组键使用字符串拼接（非类型化复合键）
  */
 public class GroupByOperator implements PhysicalOperator {
     private final PhysicalOperator child;
@@ -114,7 +101,8 @@ public class GroupByOperator implements PhysicalOperator {
         for (SelectItem<?> item : selectItems) {
             if (item.getExpression() instanceof Function f) {
                 String name = f.getName().toLowerCase();
-                if (name.equals("count") || name.equals("max") || name.equals("min")) {
+                if (name.equals("count") || name.equals("max") || name.equals("min")
+                        || name.equals("sum") || name.equals("avg")) {
                     this.aggFuncName = name;
                     var params = f.getParameters();
                     if (params == null || params.getExpressions() == null || params.getExpressions().isEmpty()) {
@@ -263,7 +251,35 @@ public class GroupByOperator implements PhysicalOperator {
                 }
                 yield best != null ? best : new Value((long) 0, ValueType.INTEGER);
             }
+            case "sum" -> {
+                double total = 0.0;
+                for (Tuple t : groupTuples) {
+                    Value v = t.getValue(new TabCol(tableName, aggColumnName));
+                    if (v == null || v.value == null) continue;
+                    total += toDouble(v);
+                }
+                yield new Value(total);
+            }
+            case "avg" -> {
+                double total = 0.0;
+                long cnt = 0;
+                for (Tuple t : groupTuples) {
+                    Value v = t.getValue(new TabCol(tableName, aggColumnName));
+                    if (v == null || v.value == null) continue;
+                    total += toDouble(v);
+                    cnt++;
+                }
+                yield cnt > 0 ? new Value(total / cnt) : new Value(0.0);
+            }
             default -> new Value((long) groupTuples.size(), ValueType.INTEGER);
+        };
+    }
+
+    private double toDouble(Value v) {
+        return switch (v.type) {
+            case INTEGER -> ((Long) v.value).doubleValue();
+            case FLOAT   -> (Double) v.value;
+            default      -> 0.0;
         };
     }
 
@@ -316,7 +332,9 @@ public class GroupByOperator implements PhysicalOperator {
             if (expr instanceof Function f) {
                 String name = f.getName().toLowerCase();
                 ValueType outType = ValueType.INTEGER;
-                if ((name.equals("max") || name.equals("min")) && aggColumnName != null) {
+                if (name.equals("sum") || name.equals("avg")) {
+                    outType = ValueType.FLOAT;
+                } else if ((name.equals("max") || name.equals("min")) && aggColumnName != null) {
                     // Look up the column type from child schema
                     for (ColumnMeta cm : childSchema) {
                         if (cm.name.equals(aggColumnName) || cm.tableName.equals(tableName)) {

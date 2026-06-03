@@ -5,36 +5,44 @@ import java.util.*;
 /**
  * LRU（Least Recently Used）页面替换器 — Task 1.1（10 分）。
  *
- * <h3>数据结构设计（答辩可答）</h3>
- * <ul>
- *   <li>{@code pinnedFrames}（HashSet）：正在使用的 frame，不可淘汰。O(1) 查询/插入/删除。</li>
- *   <li>{@code LRUList}（LinkedList）：可淘汰 frame 的 LRU 顺序。
- *       链表头 = 最久未使用（Victim 候选），链表尾 = 最近使用（刚 Unpin）</li>
- *   <li>{@code LRUHash}（HashSet）：LRUList 中 frame 的快速成员检查。O(1) 确认 frame 是否在链表中。</li>
- * </ul>
+ * 数据结构设计（答辩可答）:
  *
- * <h3>核心操作</h3>
- * <ul>
+ *
+ * 
+ *   <li>pinnedFrames（HashSet）：正在使用的 frame，不可淘汰。O(1) 查询/插入/删除。
+ *   <li>LRUList（LinkedList）：可淘汰 frame 的 LRU 顺序。
+ *       链表头 = 最久未使用（Victim 候选），链表尾 = 最近使用（刚 Unpin）
+ *   <li>LRUHash（HashSet）：LRUList 中 frame 的快速成员检查。O(1) 确认 frame 是否在链表中。
+ * 
+ *
+ * 核心操作:
+ *
+ *
+ * 
  *   <li><b>Victim()</b>：移除并返回 LRUList 头部 frame（最久未使用）。
- *       同时从 LRUHash 中删除。O(1)。</li>
+ *       同时从 LRUHash 中删除。O(1)。
  *   <li><b>Pin(frameId)</b>：标记 frame 为不可淘汰。
- *       <ul>
- *         <li>已在 pinnedFrames → 直接返回（重复 pin 不报错）</li>
+ *       
+ *         <li>已在 pinnedFrames → 直接返回（重复 pin 不报错）
  *         <li>在 LRUHash 中（可淘汰）→ 从 LRUList 中移除（用 Integer.valueOf 按对象删除，非按索引），
- *             加入 pinnedFrames</li>
- *         <li>新 frame → 检查容量（pinned + unpinned >= maxSize），加入 pinnedFrames</li>
- *       </ul>
- *   </li>
+ *             加入 pinnedFrames
+ *         <li>新 frame → 检查容量（pinned + unpinned >= maxSize），加入 pinnedFrames
+ *       
+ *   
  *   <li><b>Unpin(frameId)</b>：标记 frame 为可淘汰，移到 LRUList 尾部（最近使用）。
- *       从 pinnedFrames 移除 → 加入 LRUHash + LRUList.addLast()。O(1)。</li>
- * </ul>
+ *       从 pinnedFrames 移除 → 加入 LRUHash + LRUList.addLast()。O(1)。
+ * 
  *
- * <h3>为什么用 Integer.valueOf？（答辩细节题）</h3>
- * {@code LRUList.remove(Integer.valueOf(frameId))} 按对象删除，而非按索引删除。
- * {@code LRUList.remove(int)} 会按索引删除，语义错误。
+ * 为什么用 Integer.valueOf？（答辩细节题）:
  *
- * <h3>容量管理</h3>
- * {@code size() = LRUList.size() + pinnedFrames.size()}。
+ *
+ * LRUList.remove(Integer.valueOf(frameId)) 按对象删除，而非按索引删除。
+ * LRUList.remove(int) 会按索引删除，语义错误。
+ *
+ * 容量管理:
+ *
+ *
+ * size() = LRUList.size() + pinnedFrames.size()。
  * 当 size >= maxSize 时不能再 Pin 新 frame。
  */
 public class LRUReplacer implements PageReplacer {

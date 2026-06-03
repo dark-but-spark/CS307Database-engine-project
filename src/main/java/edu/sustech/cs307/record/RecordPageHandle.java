@@ -6,9 +6,9 @@ import io.netty.buffer.ByteBuf;
 /**
  * 记录页面句柄类，用于管理记录文件的页面。
  * 
- * <p>
+ * 
  * 该类包含页面的头部信息、位图和槽位数据，并提供获取特定槽位的方法。
- * </p>
+ * 
  */
 public class RecordPageHandle {
     public final RecordFileHeader fileHdr;

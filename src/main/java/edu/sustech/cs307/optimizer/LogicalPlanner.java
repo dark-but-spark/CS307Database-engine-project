@@ -209,6 +209,9 @@ public class LogicalPlanner {
         if (isMaxMinQuery(plainSelect)) {
             return buildMaxMinPlan(plainSelect, root, tableName);
         }
+        if (isSumAvgQuery(plainSelect)) {
+            return buildSumAvgPlan(plainSelect, root, tableName);
+        }
         if (plainSelect.getGroupBy() != null) {
             return new LogicalGroupByOperator(root, plainSelect.getGroupBy(),
                     plainSelect.getSelectItems(), tableName);
@@ -278,6 +281,32 @@ public class LogicalPlanner {
             throw new DBException(ExceptionTypes.UnsupportedExpression(function));
         }
         return new LogicalMaxMinOperator(root, function.getName().equalsIgnoreCase("max"),
+                column.getColumnName(), column.getTableName() == null ? tableName : column.getTableName());
+    }
+
+    private static boolean isSumAvgQuery(PlainSelect plainSelect) {
+        List<SelectItem<?>> selectItems = plainSelect.getSelectItems();
+        if (selectItems == null || selectItems.size() != 1) return false;
+        if (selectItems.get(0).getExpression() instanceof Function f) {
+            String name = f.getName().toLowerCase();
+            return name.equals("sum") || name.equals("avg");
+        }
+        return false;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static LogicalOperator buildSumAvgPlan(PlainSelect plainSelect,
+                                                    LogicalOperator root, String tableName) throws DBException {
+        SelectItem<?> selectItem = plainSelect.getSelectItems().get(0);
+        Function function = (Function) selectItem.getExpression();
+        boolean isSum = function.getName().equalsIgnoreCase("sum");
+        ExpressionList<?> parameters = function.getParameters();
+        if (parameters == null || parameters.getExpressions() == null
+                || parameters.getExpressions().isEmpty()
+                || !(parameters.getExpressions().get(0) instanceof Column column)) {
+            throw new DBException(ExceptionTypes.UnsupportedExpression(function));
+        }
+        return new LogicalSumAvgOperator(root, isSum,
                 column.getColumnName(), column.getTableName() == null ? tableName : column.getTableName());
     }
 

@@ -18,27 +18,35 @@ import org.pmw.tinylog.Logger;
 /**
  * 磁盘管理器 — Task 1 存储管理底层。
  *
- * <h3>核心职责（答辩可答）</h3>
- * <ul>
- *   <li>页级文件 I/O：ReadPage / WritePage / FlushPage / AllocatePage</li>
- *   <li>文件管理：CreateFile / DeleteFile，每个表对应一个数据文件</li>
- *   <li>元数据持久化：filePages（Map&lt;filename, pageCount&gt;）记录每个文件分配了多少页，
- *       持久化到 disk_manager_meta.json</li>
- * </ul>
+ * 核心职责（答辩可答）:
  *
- * <h3>页面分配（AllocatePage）</h3>
+ *
+ * 
+ *   <li>页级文件 I/O：ReadPage / WritePage / FlushPage / AllocatePage
+ *   <li>文件管理：CreateFile / DeleteFile，每个表对应一个数据文件
+ *   <li>元数据持久化：filePages（Map&lt;filename, pageCount&gt;）记录每个文件分配了多少页，
+ *       持久化到 disk_manager_meta.json
+ * 
+ *
+ * 页面分配（AllocatePage）:
+ *
+ *
  * 每次分配返回下一个可用页号（filePages[filename]++），页号从 0 开始递增。
  * 页的实际磁盘偏移 = pageId * DEFAULT_PAGE_SIZE (4096 bytes)。
  *
- * <h3>filePages 的作用（答辩追问）</h3>
- * filePages 记录每个数据文件已分配的页数：
- * <ul>
- *   <li>读取时：知道文件有多少页 → SeqScan 知道遍历边界</li>
- *   <li>分配时：每次 NewPage 递增对应的 filePages[filename]</li>
- *   <li>事务 ROLLBACK 时：必须恢复到 BEGIN 时的 filePages 快照，否则页数错乱</li>
- * </ul>
+ * filePages 的作用（答辩追问）:
  *
- * <h3>I/O 模型</h3>
+ *
+ * filePages 记录每个数据文件已分配的页数：
+ * 
+ *   <li>读取时：知道文件有多少页 → SeqScan 知道遍历边界
+ *   <li>分配时：每次 NewPage 递增对应的 filePages[filename]
+ *   <li>事务 ROLLBACK 时：必须恢复到 BEGIN 时的 filePages 快照，否则页数错乱
+ * 
+ *
+ * I/O 模型:
+ *
+ *
  * 使用 java.nio.channels.FileChannel 做随机读写，每次操作一个 Page（4096 字节）。
  * ReadPage/WritePage 从指定 filename + offset 位置读写完整 Page。
  */

@@ -10,23 +10,23 @@ import io.netty.buffer.ByteBuf;
 /**
  * 记录文件处理类，负责管理记录文件的读取、插入、删除和更新操作。
  * 
- * <p>
+ * 
  * 该类使用 DiskManager 和 BufferPool 来处理文件的页和缓冲区，提供对记录的基本操作。
- * </p>
  * 
- * <p>
+ * 
+ * 
  * 主要功能包括：
- * </p>
- * <ul>
- * <li>读取文件头信息以获取页面数量</li>
- * <li>插入新记录并管理空闲页面</li>
- * <li>删除和更新现有记录</li>
- * <li>根据记录 ID 获取记录</li>
- * </ul>
  * 
- * <p>
+ * 
+ * - 读取文件头信息以获取页面数量
+ * - 插入新记录并管理空闲页面
+ * - 删除和更新现有记录
+ * - 根据记录 ID 获取记录
+ * 
+ * 
+ * 
  * 异常处理：在操作过程中，如果遇到文件损坏或页面超出范围等情况，将抛出 DBException 或 RuntimeException。
- * </p>
+ * 
  */
 public class RecordFileHandle {
     DiskManager diskManager;
@@ -45,7 +45,7 @@ public class RecordFileHandle {
     /**
      * 获取记录文件的头部信息。
      *
-     * @return 返回当前记录文件的头部对象 {@link RecordFileHeader}。
+     * @return 返回当前记录文件的头部对象 RecordFileHeader。
      */
     public RecordFileHeader getFileHeader() {
         return fileHeader;

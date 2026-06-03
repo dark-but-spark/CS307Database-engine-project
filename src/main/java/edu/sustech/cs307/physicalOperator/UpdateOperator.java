@@ -24,30 +24,40 @@ import net.sf.jsqlparser.statement.update.UpdateSet;
 /**
  * UPDATE 物理算子 — Task 2.0.2 数据操作。
  *
- * <h3>执行流程（两阶段：扫描 + 原地更新）</h3>
- * <ol>
- *   <li>Begin() 从子算子（SeqScan 或 IndexScan）扫描所有匹配行，收集待更新 RID</li>
- *   <li>遍历收集的 RID，对每个执行更新</li>
- * </ol>
+ * 执行流程（两阶段：扫描 + 原地更新）:
  *
- * <h3>为什么先收集后更新？（答辩可问）</h3>
+ *
+ * 
+ *   <li>Begin() 从子算子（SeqScan 或 IndexScan）扫描所有匹配行，收集待更新 RID
+ *   <li>遍历收集的 RID，对每个执行更新
+ * 
+ *
+ * 为什么先收集后更新？（答辩可问）:
+ *
+ *
  * 如果边扫描边更新，更新后的记录可能被重复扫描（若表扫描按页遍历）。
  * "collect-then-update" 确保只处理一次。
  *
- * <h3>原地更新（In-place Update）</h3>
- * <ul>
- *   <li>UpdateRecord() 在相同 RID 位置写回新记录（不重新分配 slot）</li>
- *   <li>先读旧记录 → 提取 oldValues → 构造新 ByteBuf → 写回同位置</li>
- * </ul>
+ * 原地更新（In-place Update）:
  *
- * <h3>索引同步（关键步骤）</h3>
+ *
+ * 
+ *   <li>UpdateRecord() 在相同 RID 位置写回新记录（不重新分配 slot）
+ *   <li>先读旧记录 → 提取 oldValues → 构造新 ByteBuf → 写回同位置
+ * 
+ *
+ * 索引同步（关键步骤）:
+ *
+ *
  * UPDATE 对索引列的影响 = DELETE(旧值) + INSERT(新值)：
- * <ul>
- *   <li>遍历表的所有索引 → 找到被更新的索引列 → index.delete(oldValue, rid)</li>
- *   <li>再 index.insert(newValue, rid) 同步新值到 B+Tree</li>
- * </ul>
+ * 
+ *   <li>遍历表的所有索引 → 找到被更新的索引列 → index.delete(oldValue, rid)
+ *   <li>再 index.insert(newValue, rid) 同步新值到 B+Tree
+ * 
  *
- * <h3>接受 IndexScanOperator 作为输入</h3>
+ * 接受 IndexScanOperator 作为输入:
+ *
+ *
  * 如果 WHERE 条件命中索引，PhysicalPlanner 会传入 IndexScanOperator。
  * UpdateOperator 通过子算子获取 RecordFileHandle 做原地更新。
  */

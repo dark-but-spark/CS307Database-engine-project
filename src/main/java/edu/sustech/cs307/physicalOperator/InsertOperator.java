@@ -17,28 +17,36 @@ import java.util.ArrayList;
 /**
  * INSERT 物理算子 — Task 2.0.2 数据操作。
  *
- * <h3>执行流程（Begin() 单次执行）</h3>
- * <ol>
- *   <li>遍历预解析的 values 列表（支持多行 INSERT：VALUES (1), (2), (3)）</li>
- *   <li>按列类型序列化每个 Value 到 ByteBuf（int=4字节, float=8字节, char=CHAR_SIZE字节）</li>
- *   <li>调用 RecordManager.InsertRecord() 写入磁盘 → 返回 RID（页号, 槽号）</li>
- *   <li>调用 dbManager.insertIntoIndexes() 同步更新所有相关 B+Tree 索引</li>
- * </ol>
+ * 执行流程（Begin() 单次执行）:
  *
- * <h3>列值序列化</h3>
- * {@code writeColumnToBuf()} 按 ValueType 选择 writer：
- * <ul>
- *   <li>INTEGER → writeInt（4 字节，小端序）</li>
- *   <li>FLOAT → writeDouble（8 字节）</li>
- *   <li>CHAR → 固定 CHAR_SIZE 字节（不足用 0 填充）</li>
- * </ul>
  *
- * <h3>索引同步</h3>
+ * 
+ *   <li>遍历预解析的 values 列表（支持多行 INSERT：VALUES (1), (2), (3)）
+ *   <li>按列类型序列化每个 Value 到 ByteBuf（int=4字节, float=8字节, char=CHAR_SIZE字节）
+ *   <li>调用 RecordManager.InsertRecord() 写入磁盘 → 返回 RID（页号, 槽号）
+ *   <li>调用 dbManager.insertIntoIndexes() 同步更新所有相关 B+Tree 索引
+ * 
+ *
+ * 列值序列化:
+ *
+ *
+ * writeColumnToBuf() 按 ValueType 选择 writer：
+ * 
+ *   <li>INTEGER → writeInt（4 字节，小端序）
+ *   <li>FLOAT → writeDouble（8 字节）
+ *   <li>CHAR → 固定 CHAR_SIZE 字节（不足用 0 填充）
+ * 
+ *
+ * 索引同步:
+ *
+ *
  * InsertOperator 只负责写入数据和返回 RID。
  * 索引维护由 DBManager.insertIntoIndexes(tableName, columnValues, rid) 统一处理，
  * 遍历该表所有 BPlusTreeIndex，对每个索引列调用 index.insert(value, rid)。
  *
- * <h3>outputed 标志</h3>
+ * outputed 标志:
+ *
+ *
  * INSERT 是单输出算子：hasNext() 第一次返回 true，Current() 返回影响行数，之后 outputed=true。
  */
 public class InsertOperator implements PhysicalOperator {

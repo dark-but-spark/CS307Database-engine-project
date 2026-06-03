@@ -11,7 +11,9 @@ import java.util.*;
 /**
  * BufferPool（缓冲池） — Task 1 存储管理核心组件（答辩必问）。
  *
- * <h3>在架构中的位置（答辩可答）</h3>
+ * 在架构中的位置（答辩可答）:
+ *
+ *
  * BufferPool 是存储层的中间层，位于上层算子与 DiskManager 之间：
  * <pre>
  * 上层算子 (SeqScan/Insert/Update...)
@@ -21,49 +23,61 @@ import java.util.*;
  * DiskManager（磁盘 I/O）
  * </pre>
  *
- * <h3>核心数据结构</h3>
- * <ul>
- *   <li>{@code pageMap}（HashMap&lt;PagePosition, frameId&gt;）：页面位置 → frame 索引的缓存映射。
- *       PagePosition = (filename, offset)，唯一标识一个磁盘页面。</li>
- *   <li>{@code pages}（ArrayList&lt;Page&gt;）：frame 数组，每个 slot 存一个 Page 对象</li>
- *   <li>{@code freeList}（LinkedList）：空闲 frame 索引列表，初始时全部 free</li>
- *   <li>{@code replacer}（PageReplacer）：页面替换器（LRU 或 Clock），管理可淘汰 frame</li>
- * </ul>
+ * 核心数据结构:
  *
- * <h3>FetchPage 流程（最核心方法，答辩必讲）</h3>
- * <ol>
- *   <li>pageMap 命中 → pin_count++，pin_count 从 0→1 时 replacer.Pin()</li>
+ *
+ * 
+ *   <li>pageMap（HashMap&lt;PagePosition, frameId&gt;）：页面位置 → frame 索引的缓存映射。
+ *       PagePosition = (filename, offset)，唯一标识一个磁盘页面。
+ *   <li>pages（ArrayList&lt;Page&gt;）：frame 数组，每个 slot 存一个 Page 对象
+ *   <li>freeList（LinkedList）：空闲 frame 索引列表，初始时全部 free
+ *   <li>replacer（PageReplacer）：页面替换器（LRU 或 Clock），管理可淘汰 frame
+ * 
+ *
+ * FetchPage 流程（最核心方法，答辩必讲）:
+ *
+ *
+ * 
+ *   <li>pageMap 命中 → pin_count++，pin_count 从 0→1 时 replacer.Pin()
  *   <li>pageMap 未命中 → find_victim_page() 找 victim frame
- *       <ul>
- *         <li>freeList 非空 → 取 freeList.removeFirst()</li>
- *         <li>freeList 空 → replacer.Victim()，如果 dirty 则先 FlushPage</li>
- *       </ul>
- *   </li>
- *   <li>update_page() 清理旧页面映射 + 绑定新位置</li>
- *   <li>diskManager.ReadPage() 从磁盘读入</li>
- *   <li>pin_count++，pin_count==1 时 replacer.Pin()</li>
- * </ol>
+ *       
+ *         <li>freeList 非空 → 取 freeList.removeFirst()
+ *         <li>freeList 空 → replacer.Victim()，如果 dirty 则先 FlushPage
+ *       
+ *   
+ *   <li>update_page() 清理旧页面映射 + 绑定新位置
+ *   <li>diskManager.ReadPage() 从磁盘读入
+ *   <li>pin_count++，pin_count==1 时 replacer.Pin()
+ * 
  *
- * <h3>pin_count 语义（答辩高频追问）</h3>
- * <ul>
- *   <li>pin_count > 0：页面正在被使用，replacer 标记为不可淘汰</li>
- *   <li>pin_count == 0：页面可淘汰（replacer.Unpin 将其加入候选集）</li>
- *   <li>同一页面可被多次 Pin（每次 FetchPage 都 pin_count++）</li>
- * </ul>
+ * pin_count 语义（答辩高频追问）:
  *
- * <h3>Dirty Page 处理</h3>
- * <ul>
- *   <li>MarkPageDirty()：标记页面已被修改（写操作后调用）</li>
- *   <li>find_victim_page()：dirty victim 淘汰前先 FlushPage 写回磁盘</li>
- *   <li>FlushPage()：显式将特定页面写入磁盘并清除 dirty 标志</li>
- *   <li>FlushAllPages()：事务 COMMIT 前刷全部脏页</li>
- * </ul>
  *
- * <h3>DiscardAllPages() — 事务 ROLLBACK 专用</h3>
+ * 
+ *   <li>pin_count > 0：页面正在被使用，replacer 标记为不可淘汰
+ *   <li>pin_count == 0：页面可淘汰（replacer.Unpin 将其加入候选集）
+ *   <li>同一页面可被多次 Pin（每次 FetchPage 都 pin_count++）
+ * 
+ *
+ * Dirty Page 处理:
+ *
+ *
+ * 
+ *   <li>MarkPageDirty()：标记页面已被修改（写操作后调用）
+ *   <li>find_victim_page()：dirty victim 淘汰前先 FlushPage 写回磁盘
+ *   <li>FlushPage()：显式将特定页面写入磁盘并清除 dirty 标志
+ *   <li>FlushAllPages()：事务 COMMIT 前刷全部脏页
+ * 
+ *
+ * DiscardAllPages() — 事务 ROLLBACK 专用:
+ *
+ *
  * 直接丢弃所有页面（不清洗 dirty page），清空 pageMap 和 replacer。
  * 因为 ROLLBACK 要丢弃未提交的修改，不能把它们写回磁盘。
  *
- * <h3>PagePosition 唯一性</h3>
+ * PagePosition 唯一性:
+ *
+ *
  * 一个 (filename, offset) 在 pageMap 中只能对应一个 frame。
  * update_page() 先移除旧 position 映射，再绑定新 position。
  */

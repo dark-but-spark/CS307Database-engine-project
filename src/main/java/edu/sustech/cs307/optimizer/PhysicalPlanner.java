@@ -56,6 +56,8 @@ public class PhysicalPlanner {
             return handleCount(dbManager, countOperator);
         } else if (logicalOp instanceof LogicalOrderByOperator orderByOperator) {
             return handleOrderBy(dbManager, orderByOperator);
+        } else if (logicalOp instanceof LogicalSumAvgOperator sumAvgOperator) {
+            return handleSumAvg(dbManager, sumAvgOperator);
         } else if (logicalOp instanceof LogicalMaxMinOperator maxMinOperator) {
             return handleMaxMin(dbManager, maxMinOperator);
         } else if (logicalOp instanceof LogicalGroupByOperator groupByOperator) {
@@ -107,22 +109,28 @@ public class PhysicalPlanner {
     /**
      * 尝试将过滤谓词转换为基于 B+Tree 索引的扫描。
      *
-     * <h3>算法流程（答辩可逐条说明）</h3>
-     * <ol>
-     *   <li>检查 filter 子节点是否为 TableScanOperator（只优化单表 WHERE）</li>
-     *   <li>将 WHERE 表达式拆解为 AND 条件列表（collectAndConjuncts）</li>
-     *   <li>遍历 AND conjuncts，找到第一个有索引的列</li>
+     * 算法流程（答辩可逐条说明）:
+ *
+ *
+     * 
+     *   <li>检查 filter 子节点是否为 TableScanOperator（只优化单表 WHERE）
+     *   <li>将 WHERE 表达式拆解为 AND 条件列表（collectAndConjuncts）
+     *   <li>遍历 AND conjuncts，找到第一个有索引的列
      *   <li>收集同一列上所有 AND 条件，合并为最紧边界：
      *       例 id >= 10 AND id < 16 AND id > 5
-     *       → low=10(inclusive), high=16(exclusive)（isTighterLow/isTighterHigh 选最紧值）</li>
-     *   <li>等值条件优先 → IndexScanOperator(EQUAL)；否则 → IndexScanOperator(RANGE, low, high)</li>
-     * </ol>
+     *       → low=10(inclusive), high=16(exclusive)（isTighterLow/isTighterHigh 选最紧值）
+     *   <li>等值条件优先 → IndexScanOperator(EQUAL)；否则 → IndexScanOperator(RANGE, low, high)
+     * 
      *
-     * <h3>为什么外层仍要 FilterOperator？</h3>
+     * 为什么外层仍要 FilterOperator？:
+ *
+ *
      * 索引只吸收同一列上的部分条件，其他列的条件和未被索引吸收的条件
      * 由 FilterOperator 在读取完整记录后判断，保证语义正确。
      *
-     * <h3>当前限制（TODO）</h3>
+     * 当前限制（TODO）:
+ *
+ *
      * 只选第一个命中索引的列，不支持 OR、多索引交集、代价估计。
      *
      * @param dbManager       数据库管理器
@@ -283,13 +291,15 @@ public class PhysicalPlanner {
     /**
      * 索引边界收集器。将同一索引列上的多个 AND 条件合并为最紧边界区间。
      * 
-     * <h3>最紧边界合并逻辑（答辩可答）</h3>
-     * <ul>
-     *   <li>下界选最大值：多个 col > X 条件取最大的 X → 扫描范围最小</li>
-     *   <li>上界选最小值：多个 col < Y 条件取最小的 Y → 扫描范围最小</li>
-     *   <li>边界相等时：inclusive 优先于 exclusive（closed 比 open 更紧）</li>
-     *   <li>等值条件优先级最高，一旦出现直接覆盖所有范围条件</li>
-     * </ul>
+     * 最紧边界合并逻辑（答辩可答）:
+ *
+ *
+     * 
+     *   <li>下界选最大值：多个 col > X 条件取最大的 X → 扫描范围最小
+     *   <li>上界选最小值：多个 col < Y 条件取最小的 Y → 扫描范围最小
+     *   <li>边界相等时：inclusive 优先于 exclusive（closed 比 open 更紧）
+     *   <li>等值条件优先级最高，一旦出现直接覆盖所有范围条件
+     * 
      * 
      * 例：WHERE id > 10 AND id >= 15 AND id < 20
      * → low=15(inclusive), high=20(exclusive)
@@ -516,6 +526,13 @@ public class PhysicalPlanner {
         PhysicalOperator child = generateOperator(dbManager, logicalMaxMinOp.getChild());
         return new MaxMinOperator(child, logicalMaxMinOp.isMax(),
                 logicalMaxMinOp.getColumnName(), logicalMaxMinOp.getTableName());
+    }
+
+    private static PhysicalOperator handleSumAvg(DBManager dbManager, LogicalSumAvgOperator logicalSumAvgOp)
+            throws DBException {
+        PhysicalOperator child = generateOperator(dbManager, logicalSumAvgOp.getChild());
+        return new SumAvgOperator(child, logicalSumAvgOp.isSum(),
+                logicalSumAvgOp.getColumnName(), logicalSumAvgOp.getTableName());
     }
 
     private static PhysicalOperator handleGroupBy(DBManager dbManager, LogicalGroupByOperator logicalGroupByOp)

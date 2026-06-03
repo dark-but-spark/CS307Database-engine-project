@@ -6,9 +6,9 @@ import io.netty.buffer.ByteBuf;
  * 记录文件头部类，用于管理记录文件的元数据。
  * 包含记录大小、页面数量、每页记录数量、首个空闲页面和位图大小等信息。
  * 
- * <p>
+ * 
  * 该类提供了对这些属性的获取和设置方法，所有数据均存储在 ByteBuf 中。
- * </p>
+ * 
  */
 public class RecordFileHeader {
     public final static int SIZE = 20;
